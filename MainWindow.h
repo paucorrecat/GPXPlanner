@@ -1,0 +1,147 @@
+#pragma once
+#include <QMainWindow>
+#include <QSettings>
+#include "TrackPlanner.h"
+#include "ElevationChartView.h"
+#include "PlanSerializer.h"
+
+#include <QAreaSeries>
+#include <QLineSeries>
+#include <QValueAxis>
+#include <QChart>
+
+QT_BEGIN_NAMESPACE
+class QLineEdit;
+class QPushButton;
+class QTableWidget;
+class QTextEdit;
+class QDateTimeEdit;
+class QDoubleSpinBox;
+class QLabel;
+class QSplitter;
+class QGroupBox;
+QT_END_NAMESPACE
+
+class MainWindow : public QMainWindow
+{
+    Q_OBJECT
+
+public:
+    explicit MainWindow(QWidget* parent = nullptr);
+    ~MainWindow() override;           // neteja temporal en tancar
+
+private slots:
+    void onBrowseInput();
+    void onBrowseOutput();
+    void onLoadGPX();
+    void onCompute();
+    void onExport();
+    void onRemoveStop();
+    void onSavePlan();                // desa pla definitiu
+
+    void onDivisorMoved(int divisorIdx, int newPointIdx);
+    void onDivisorAdded(int pointIdx);
+    void onDivisorRemoved(int divisorIdx);
+    void onStopAdded(int pointIdx);
+    void onStopRemoved(int stopIdx);
+
+private:
+    // ── UI builders ──────────────────────────────────────────────────────────
+    void buildUI();
+    QWidget* buildFilePanel();
+    QWidget* buildRiderPanel();
+    QWidget* buildSegmentsPanel();
+    QWidget* buildStopsPanel();
+    QWidget* buildSummaryPanel();
+    QWidget* buildElevationChart();
+
+    // ── Persistència ─────────────────────────────────────────────────────────
+    void saveSettings();
+    void loadSettings();
+    void autoSaveTmp();               // desa a .tmp després de cada canvi
+    void applyPlan(const PlanSerializer::Plan& plan);  // aplica un pla carregat
+    PlanSerializer::Plan currentPlan() const;          // construeix el pla actual
+
+    // ── Helpers ──────────────────────────────────────────────────────────────
+    void rebuildSegmentTable();
+    void refreshSegmentStats();
+    void refreshSpeedTimeColumns();
+    void redrawDivisors();
+    void updateSummaryLabels();
+    void updateSegCountDisplay();
+    void updateElevationChart(const QVector<TrackPoint>& points);
+    void setStatus(const QString& msg, bool error = false);
+    void updateTitleBar();            // mostra * si hi ha canvis no desats
+
+    // Columnes de la taula de trams
+    enum SegCol {
+        ColName=0,
+        ColPkStart, ColPkEnd,
+        ColDist, ColGrade, ColDplus, ColDminus, ColAltEnd,
+        ColPower,
+        ColSpeed, ColTime, ColCumTime,
+        ColCount
+    };
+
+    // ── Membres UI ───────────────────────────────────────────────────────────
+    QLineEdit*          m_inputPath      = nullptr;
+    QLineEdit*          m_outputPath     = nullptr;
+    QPushButton*        m_btnLoad        = nullptr;
+    QPushButton*        m_btnCompute     = nullptr;
+    QPushButton*        m_btnExport      = nullptr;
+    QPushButton*        m_btnSavePlan    = nullptr;
+    QDateTimeEdit*      m_startTime      = nullptr;
+
+    QDoubleSpinBox*     m_mass           = nullptr;
+    QDoubleSpinBox*     m_ftp            = nullptr;
+    QDoubleSpinBox*     m_cda            = nullptr;
+    QDoubleSpinBox*     m_crr            = nullptr;
+
+    QTableWidget*       m_segTable       = nullptr;
+    QTableWidget*       m_stopTable      = nullptr;
+    QLabel*             m_statusBar      = nullptr;
+
+    // Gràfic
+    ElevationChartView* m_chartView      = nullptr;
+    QChart*             m_chart          = nullptr;
+    QAreaSeries*        m_areaSeries     = nullptr;
+    QLineSeries*        m_upperLine      = nullptr;
+    QLineSeries*        m_lowerLine      = nullptr;
+    QValueAxis*         m_axisX          = nullptr;
+    QValueAxis*         m_axisY          = nullptr;
+
+    // Labels resum
+    QLabel*             m_lblTotalDist   = nullptr;
+    QLabel*             m_lblTotalDplus  = nullptr;
+    QLabel*             m_lblTotalDminus = nullptr;
+    QLabel*             m_lblNSegs       = nullptr;
+    QLabel*             m_lblTotalTime   = nullptr;
+    QLabel*             m_lblArrival     = nullptr;
+    QLabel*             m_lblAvgSpeed    = nullptr;
+
+    // ── Model ────────────────────────────────────────────────────────────────
+    QVector<int>        m_divisors;
+    QVector<StopPoint>  m_stops;
+    QVector<double>     m_cumDistKm;
+
+    TrackPlanner        m_planner;
+    QSettings           m_settings;
+    int                 m_totalPoints    = 0;
+    QVector<TrackPoint> m_loadedPoints;
+    QString             m_currentGpxPath;   // path del GPX actiu
+    bool                m_hasUnsavedChanges = false;
+
+    static const QList<QColor> k_segColors;
+
+    // Format de temps h:min:s
+    static QString formatTime(double totalSec) {
+        int h   = static_cast<int>(totalSec) / 3600;
+        int min = (static_cast<int>(totalSec) % 3600) / 60;
+        int sec = static_cast<int>(totalSec) % 60;
+        if (h > 0)
+            return QString("%1h %2:%3")
+                   .arg(h).arg(min,2,10,QChar('0')).arg(sec,2,10,QChar('0'));
+        return QString("%1:%2")
+               .arg(min).arg(sec,2,10,QChar('0'));
+    }
+};
