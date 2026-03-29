@@ -42,6 +42,15 @@ public:
         spin->setSingleStep(0.05);
         spin->setDecimals(2);
         spin->setFrame(false);
+        // Forcem fons blanc i text negre per evitar que el color
+        // de selecció de la taula tapi els botons de fletxa.
+        spin->setStyleSheet(
+            "QDoubleSpinBox {"
+            "  background: white;"
+            "  color: black;"
+            "  selection-background-color: #cce8ff;"
+            "  selection-color: black;"
+            "}");
         return spin;
     }
 
@@ -104,9 +113,9 @@ private:
     // ── Persistència ─────────────────────────────────────────────────────────
     void saveSettings();
     void loadSettings();
-    void autoSaveTmp();               // desa a .tmp després de cada canvi
-    void applyPlan(const PlanSerializer::Plan& plan);  // aplica un pla carregat
-    PlanSerializer::Plan currentPlan() const;          // construeix el pla actual
+    void autoSaveTmp();
+    void applyPlan(const PlanSerializer::Plan& plan);
+    PlanSerializer::Plan currentPlan() const;
 
     // ── Helpers ──────────────────────────────────────────────────────────────
     void rebuildSegmentTable();
@@ -117,7 +126,7 @@ private:
     void updateSegCountDisplay();
     void updateElevationChart(const QVector<TrackPoint>& points);
     void setStatus(const QString& msg, bool error = false);
-    void updateTitleBar();            // mostra * si hi ha canvis no desats
+    void updateTitleBar();
 
     // Columnes de la taula de trams
     enum SegCol {
@@ -175,7 +184,7 @@ private:
     QSettings           m_settings;
     int                 m_totalPoints    = 0;
     QVector<TrackPoint> m_loadedPoints;
-    QString             m_currentGpxPath;   // path del GPX actiu
+    QString             m_currentGpxPath;
     bool                m_hasUnsavedChanges = false;
 
     static const QList<QColor> k_segColors;

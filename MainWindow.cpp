@@ -206,6 +206,12 @@ QWidget* MainWindow::buildSegmentsPanel()
     m_segTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_segTable->setAlternatingRowColors(false);   // els colors de fila els posem nosaltres
     m_segTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    // Desactiva el highlight blau de selecció — els colors de fila ja indiquen el tram
+    m_segTable->setStyleSheet(
+        "QTableWidget::item:selected {"
+        "  background: transparent;"
+        "  color: black;"
+        "}");
     v->addWidget(m_segTable);
 
     auto* hint = new QLabel(
