@@ -17,6 +17,9 @@
  *   F_aerodinàmica= 0.5 × ρ × CdA × (v + v_vent)²
  *
  * Donat P objectiu, resolem per v numèricament (bisecció).
+ * La velocitat física resultant es multiplica per terrainFactor per
+ * incorporar dificultats no modelables físicament (camí estret,
+ * tècnica, exposició, fang, etc.).
  */
 class TimeEstimator {
 public:
@@ -73,6 +76,7 @@ public:
     /**
      * Calcula el temps estimat (s) per a un segment complet.
      * Actualitza segment.estimatedSpeedMs i segment.estimatedTimeSec.
+     * El terrainFactor s'aplica com a multiplicador final de la velocitat física.
      */
     void computeSegment(TrackSegment& segment) const {
         double speedMs = estimateSpeed(
@@ -81,9 +85,9 @@ public:
             segment.windSpeedMs,
             segment.avgElevM
         );
-        segment.estimatedSpeedMs = speedMs;
-        if (speedMs > 0.0)
-            segment.estimatedTimeSec = segment.distanceM / speedMs;
+        segment.estimatedSpeedMs = speedMs * segment.terrainFactor;
+        if (segment.estimatedSpeedMs > 0.0)
+            segment.estimatedTimeSec = segment.distanceM / segment.estimatedSpeedMs;
         else
             segment.estimatedTimeSec = 9999.0; // pràcticament aturat
     }

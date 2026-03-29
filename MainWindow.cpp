@@ -198,8 +198,10 @@ QWidget* MainWindow::buildSegmentsPanel()
         "Pk ini (km)", "Pk fi (km)",
         "Dist.(km)", "Pend.(%)", "D+(m)", "D−(m)", "Alt.fi(m)",
         "Pot.(W)",
+        "Terreny (×)",
         "Vel.(km/h)", "Temps", "Temps acum."
     });
+    m_segTable->setItemDelegateForColumn(ColTerrain, new TerrainDelegate(m_segTable));
     m_segTable->horizontalHeader()->setSectionResizeMode(ColName, QHeaderView::Stretch);
     m_segTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_segTable->setAlternatingRowColors(false);   // els colors de fila els posem nosaltres
@@ -445,9 +447,11 @@ void MainWindow::rebuildSegmentTable()
 
     QVector<QString> oldNames;
     QVector<double>  oldPowers;
+    QVector<double>  oldTerrains;
     for (int i=0; i<m_segTable->rowCount(); ++i) {
-        oldNames  << (m_segTable->item(i,ColName)  ? m_segTable->item(i,ColName)->text()             : QString("Tram %1").arg(i+1));
-        oldPowers << (m_segTable->item(i,ColPower) ? m_segTable->item(i,ColPower)->text().toDouble() : 150.0);
+        oldNames    << (m_segTable->item(i,ColName)    ? m_segTable->item(i,ColName)->text()               : QString("Tram %1").arg(i+1));
+        oldPowers   << (m_segTable->item(i,ColPower)   ? m_segTable->item(i,ColPower)->text().toDouble()   : 150.0);
+        oldTerrains << (m_segTable->item(i,ColTerrain) ? m_segTable->item(i,ColTerrain)->text().toDouble() : 1.0);
     }
 
     QVector<int> boundaries = {0};
@@ -460,8 +464,9 @@ void MainWindow::rebuildSegmentTable()
         int s0 = boundaries[i], s1 = boundaries[i+1];
         auto segs = GPXParser::buildSegments(m_loadedPoints, {{s0,s1}});
 
-        QString name  = (i < oldNames.size())  ? oldNames[i]  : QString("Tram %1").arg(i+1);
-        double  power = (i < oldPowers.size()) ? oldPowers[i] : 150.0;
+        QString name    = (i < oldNames.size())    ? oldNames[i]    : QString("Tram %1").arg(i+1);
+        double  power   = (i < oldPowers.size())   ? oldPowers[i]   : 150.0;
+        double  terrain = (i < oldTerrains.size()) ? oldTerrains[i] : 1.0;
 
         QColor segCol = k_segColors[i % k_segColors.size()];
         QColor bgRO   = rowBgColor(segCol);           // fons columnes RO
@@ -503,7 +508,8 @@ void MainWindow::rebuildSegmentTable()
             for (int c : {ColDist,ColGrade,ColDplus,ColDminus,ColAltEnd}) ro(c,"—");
         }
 
-        rw(ColPower, QString::number(power,'f',0));
+        rw(ColPower,   QString::number(power,'f',0));
+        rw(ColTerrain, QString::number(terrain,'f',2));
         ro(ColSpeed,   "—");
         ro(ColTime,    "—");
         ro(ColCumTime, "—");
@@ -651,8 +657,9 @@ PlanSerializer::Plan MainWindow::currentPlan() const
     plan.divisors = m_divisors;
     plan.stops    = m_stops;
     for (int i=0; i<m_segTable->rowCount(); ++i) {
-        plan.segNames  << (m_segTable->item(i,ColName)  ? m_segTable->item(i,ColName)->text()             : QString("Tram %1").arg(i+1));
-        plan.segPowers << (m_segTable->item(i,ColPower) ? m_segTable->item(i,ColPower)->text().toDouble() : 150.0);
+        plan.segNames    << (m_segTable->item(i,ColName)    ? m_segTable->item(i,ColName)->text()               : QString("Tram %1").arg(i+1));
+        plan.segPowers   << (m_segTable->item(i,ColPower)   ? m_segTable->item(i,ColPower)->text().toDouble()   : 150.0);
+        plan.segTerrains << (m_segTable->item(i,ColTerrain) ? m_segTable->item(i,ColTerrain)->text().toDouble() : 1.0);
     }
     return plan;
 }
@@ -692,13 +699,16 @@ void MainWindow::applyPlan(const PlanSerializer::Plan& plan)
 
     rebuildSegmentTable();
 
-    // Aplica noms i potències des del pla
+    // Aplica noms, potències i factor terreny des del pla
     for (int i=0; i<m_segTable->rowCount() && i<plan.segNames.size(); ++i) {
         if (!plan.segNames[i].isEmpty() && m_segTable->item(i,ColName))
             m_segTable->item(i,ColName)->setText(plan.segNames[i]);
         if (i < plan.segPowers.size() && m_segTable->item(i,ColPower))
             m_segTable->item(i,ColPower)->setText(
                 QString::number(plan.segPowers[i],'f',0));
+        if (i < plan.segTerrains.size() && m_segTable->item(i,ColTerrain))
+            m_segTable->item(i,ColTerrain)->setText(
+                QString::number(plan.segTerrains[i],'f',2));
     }
 }
 
@@ -872,9 +882,10 @@ void MainWindow::onCompute()
 
     auto& segs=m_planner.segments();
     for (int i=0;i<segs.size()&&i<m_segTable->rowCount();++i) {
-        segs[i].label       =m_segTable->item(i,ColName)  ? m_segTable->item(i,ColName)->text()             : "";
-        segs[i].targetPowerW=m_segTable->item(i,ColPower) ? m_segTable->item(i,ColPower)->text().toDouble() : 150.0;
-        segs[i].windSpeedMs =0.0;
+        segs[i].label         = m_segTable->item(i,ColName)    ? m_segTable->item(i,ColName)->text()               : "";
+        segs[i].targetPowerW  = m_segTable->item(i,ColPower)   ? m_segTable->item(i,ColPower)->text().toDouble()   : 150.0;
+        segs[i].terrainFactor = m_segTable->item(i,ColTerrain) ? m_segTable->item(i,ColTerrain)->text().toDouble() : 1.0;
+        segs[i].windSpeedMs   = 0.0;
     }
 
     m_planner.clearStops();

@@ -1,6 +1,8 @@
 #pragma once
 #include <QMainWindow>
 #include <QSettings>
+#include <QStyledItemDelegate>
+#include <QDoubleSpinBox>
 #include "TrackPlanner.h"
 #include "ElevationChartView.h"
 #include "PlanSerializer.h"
@@ -22,6 +24,50 @@ class QSplitter;
 class QGroupBox;
 QT_END_NAMESPACE
 
+// ── Delegat SpinBox per a la columna Terreny ──────────────────────────────────
+// Mostra un QDoubleSpinBox [0.05, 2.00] pas 0.05 quan l'usuari edita la cel·la.
+class TerrainDelegate : public QStyledItemDelegate
+{
+    Q_OBJECT
+public:
+    explicit TerrainDelegate(QObject* parent = nullptr)
+        : QStyledItemDelegate(parent) {}
+
+    QWidget* createEditor(QWidget* parent,
+                          const QStyleOptionViewItem&,
+                          const QModelIndex&) const override
+    {
+        auto* spin = new QDoubleSpinBox(parent);
+        spin->setRange(0.05, 2.00);
+        spin->setSingleStep(0.05);
+        spin->setDecimals(2);
+        spin->setFrame(false);
+        return spin;
+    }
+
+    void setEditorData(QWidget* editor, const QModelIndex& index) const override
+    {
+        double val = index.data(Qt::EditRole).toDouble();
+        static_cast<QDoubleSpinBox*>(editor)->setValue(val);
+    }
+
+    void setModelData(QWidget* editor,
+                      QAbstractItemModel* model,
+                      const QModelIndex& index) const override
+    {
+        double val = static_cast<QDoubleSpinBox*>(editor)->value();
+        model->setData(index, QString::number(val, 'f', 2), Qt::EditRole);
+    }
+
+    void updateEditorGeometry(QWidget* editor,
+                              const QStyleOptionViewItem& option,
+                              const QModelIndex&) const override
+    {
+        editor->setGeometry(option.rect);
+    }
+};
+
+// ── MainWindow ────────────────────────────────────────────────────────────────
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -79,6 +125,7 @@ private:
         ColPkStart, ColPkEnd,
         ColDist, ColGrade, ColDplus, ColDminus, ColAltEnd,
         ColPower,
+        ColTerrain,                   // factor terreny [0.05, 2.0]
         ColSpeed, ColTime, ColCumTime,
         ColCount
     };

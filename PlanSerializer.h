@@ -41,6 +41,7 @@ public:
         QVector<int>        divisors;      // índexs GPX de les fronteres
         QVector<QString>    segNames;      // nom de cada tram
         QVector<double>     segPowers;     // potència de cada tram (W)
+        QVector<double>     segTerrains;   // factor terreny de cada tram [0.05, 2.0]
         QVector<StopPoint>  stops;
     };
 
@@ -93,9 +94,10 @@ public:
         }
         for (int i = 0; i < plan.segNames.size(); ++i) {
             xml.writeStartElement("Segment");
-            xml.writeAttribute("index",  QString::number(i));
-            xml.writeAttribute("name",   plan.segNames.value(i, QString("Tram %1").arg(i+1)));
-            xml.writeAttribute("powerW", QString::number(plan.segPowers.value(i, 150.0), 'f', 0));
+            xml.writeAttribute("index",   QString::number(i));
+            xml.writeAttribute("name",    plan.segNames.value(i, QString("Tram %1").arg(i+1)));
+            xml.writeAttribute("powerW",  QString::number(plan.segPowers.value(i, 150.0), 'f', 0));
+            xml.writeAttribute("terrain", QString::number(plan.segTerrains.value(i, 1.0), 'f', 2));
             xml.writeEndElement();
         }
         xml.writeEndElement(); // Segments
@@ -153,10 +155,12 @@ public:
                 auto a = xml.attributes();
                 int idx = a.value("index").toInt();
                 // Expandeix els vectors si cal
-                while (planOut.segNames.size()  <= idx) planOut.segNames.append("");
-                while (planOut.segPowers.size() <= idx) planOut.segPowers.append(150.0);
-                planOut.segNames[idx]  = a.value("name").toString();
-                planOut.segPowers[idx] = a.value("powerW").toDouble();
+                while (planOut.segNames.size()    <= idx) planOut.segNames.append("");
+                while (planOut.segPowers.size()   <= idx) planOut.segPowers.append(150.0);
+                while (planOut.segTerrains.size() <= idx) planOut.segTerrains.append(1.0);
+                planOut.segNames[idx]    = a.value("name").toString();
+                planOut.segPowers[idx]   = a.value("powerW").toDouble();
+                planOut.segTerrains[idx] = a.value("terrain").isEmpty() ? 1.0 : a.value("terrain").toDouble();
             }
             else if (name == QLatin1String("Stop")) {
                 auto a = xml.attributes();

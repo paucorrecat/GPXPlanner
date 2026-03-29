@@ -46,6 +46,7 @@ struct TrackSegment {
     // Paràmetres d'esforç (l'usuari els especifica per tram)
     double targetPowerW  = 150.0; // Potència objectiu (W)
     double windSpeedMs   = 0.0;   // Vent (m/s), + = vent de cara
+    double terrainFactor = 1.0;   // Multiplicador de velocitat [0.05, 2.0]; 1.0 = asfaltat
     QString label;                 // Nom del tram (p.ex. "Pujada Collserola")
 
     // Resultat del càlcul
