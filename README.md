@@ -23,20 +23,20 @@ per al **Virtual Partner** dels dispositius Garmin.
 
 | Fitxer | Responsabilitat |
 |---|---|
-| `TrackSegment.h` | Defineix `TrackPoint` (lat/lon/ele/time) i `TrackSegment` (estadístiques d'un tram). Inclou la fórmula haversine per calcular distàncies. |
+| `TrackSegment.h` | Defineix `TrackPoint` (lat/lon/ele/time) i `TrackSegment` (estadístiques d'un tram). Inclou la fórmula haversine per calcular distàncies. Cada segment té `targetPowerW`, `windSpeedMs` i `terrainFactor` (multiplicador de velocitat [0.05, 2.0]; 1.0 = asfaltat pla). |
 | `RiderProfile.h` | Paràmetres físics del ciclista: massa, FTP, CdA, Crr, eficiència transmissió, densitat aire. Inclou ajust de densitat per altitud. |
 | `StopPoint.h` | Una parada: índex del punt GPX, durada en segons, descripció. |
-| `TimeEstimator.h` | **Motor físic principal.** Donada una potència (W) i un pendent (%), calcula la velocitat sostenible resolent l'equació de potència per bisecció. Model: P = (Fg + Fr + Fa) × v / η. |
+| `TimeEstimator.h` | **Motor físic principal.** Donada una potència (W) i un pendent (%), calcula la velocitat sostenible resolent l'equació de potència per bisecció. Model: P = (Fg + Fr + Fa) × v / η. La velocitat física resultant es multiplica per `terrainFactor` per incorporar dificultats no modelables (camí estret, fang, tècnica, exposició, etc.). |
 | `GPXParser.h` | Llegeix fitxers `.gpx` (trkpt i rtept). Exporta GPX amb `<time>` a cada punt (format requerit pel Virtual Partner). Calcula estadístiques de segments (distància, D+, D−, pendent mitjà). |
 | `TrackPlanner.h` | **Orquestrador.** Connecta càrrega GPX → segments → parades → càlcul de timestamps → exportació. Genera el resum en text. |
-| `PlanSerializer.h` | Desa i carrega la planificació (trams, parades, potències, perfil) en un fitxer `.plan.xml` separat. Gestiona l'autoguardat en un `.tmp`. |
+| `PlanSerializer.h` | Desa i carrega la planificació (trams, parades, potències, factors de terreny, perfil) en un fitxer `.plan.xml` separat. Gestiona l'autoguardat en un `.tmp`. |
 
 ### Interfície gràfica
 
 | Fitxer | Responsabilitat |
 |---|---|
 | `ElevationChartView.h` | Subclasse de `QChartView`. Afegeix interacció directa al gràfic: drag de divisors, pan, zoom Ctrl+Scroll, reset amb doble clic, menú contextual per afegir/eliminar trams i parades. |
-| `MainWindow.h` / `MainWindow.cpp` | Finestra principal. Gestiona tota la UI i connecta la lògica amb la vista. |
+| `MainWindow.h` / `MainWindow.cpp` | Finestra principal. Gestiona tota la UI i connecta la lògica amb la vista. Inclou `TerrainDelegate`, un `QStyledItemDelegate` que mostra un `QDoubleSpinBox` [0.05, 2.00] pas 0.05 quan l'usuari edita la columna Terreny. |
 | `main.cpp` | Punt d'entrada. |
 
 ---
@@ -70,13 +70,17 @@ P_total = (F_gravetat + F_rodolament + F_aerodinàmica) × v / η_transmissió
 F_gravetat     = m × g × sin(θ)
 F_rodolament   = m × g × Crr × cos(θ)
 F_aerodinàmica = 0.5 × ρ × CdA × (v + v_vent)²
+
+v_efectiva = v_física × terrainFactor
 ```
 
 La velocitat es resol per **bisecció** en [0, 30] m/s (64 iteracions).
 Si la potència no és suficient per avançar, retorna 0.3 m/s (~1 km/h).
+El `terrainFactor` s'aplica com a **multiplicador final** sobre la velocitat física
+per modelar dificultats que el model de forces no captura (fang, rocam, camins tècnics…).
 
 Valors per defecte orientats a MTB:
-- Massa: 85 kg · FTP: 200 W · CdA: 0.40 m² · Crr: 0.015
+- Massa: 85 kg · FTP: 200 W · CdA: 0.40 m² · Crr: 0.015 · terrainFactor: 1.0
 
 ---
 
@@ -91,7 +95,7 @@ track.gpx.plan.xml.tmp     ← autoguardat automàtic en cada canvi
 ```
 
 **Flux:**
-1. Cada canvi (divisor, parada, potència, càlcul) → desa al `.tmp`
+1. Cada canvi (divisor, parada, potència, terreny, càlcul) → desa al `.tmp`
 2. Botó "📋 Desar pla" → promou `.tmp` → `.plan.xml` i esborra el temporal
 3. En carregar un GPX → carrega `.tmp` si existeix, si no el `.plan.xml`
 4. En tancar sense desar → el `.tmp` es conserva per a la propera sessió
@@ -103,9 +107,9 @@ track.gpx.plan.xml.tmp     ← autoguardat automàtic en cada canvi
   <Segments>
     <Divisor pointIdx="333"/>
     <Divisor pointIdx="666"/>
-    <Segment index="0" name="Pujada Collserola" powerW="220"/>
-    <Segment index="1" name="Baixada" powerW="150"/>
-    <Segment index="2" name="Pla" powerW="180"/>
+    <Segment index="0" name="Pujada Collserola" powerW="220" terrain="0.70"/>
+    <Segment index="1" name="Baixada" powerW="150" terrain="0.85"/>
+    <Segment index="2" name="Pla" powerW="180" terrain="1.00"/>
   </Segments>
   <Stops>
     <Stop pointIdx="450" durationMin="10" description="Esmorzar"/>
@@ -136,7 +140,8 @@ track.gpx.plan.xml.tmp     ← autoguardat automàtic en cada canvi
 ├───────────────────────────┴─────────────────────────────────────────┤
 │  Taula de trams (colors per tram)                                   │
 │  Nom | Pk ini | Pk fi | Dist | Pend | D+ | D− | Alt fi |           │
-│  Potència (editable) | Velocitat | Temps | Temps acum.              │
+│  Potència (editable) | Terreny (editable) | Velocitat | Temps |     │
+│  Temps acum.                                                         │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Taula de parades (afegir des del gràfic, eliminar des de la taula) │
 └─────────────────────────────────────────────────────────────────────┘
@@ -157,9 +162,10 @@ track.gpx.plan.xml.tmp     ← autoguardat automàtic en cada canvi
 | 6 | D−(m) | ❌ | Desnivell negatiu |
 | 7 | Alt.fi(m) | ❌ | Altitud al punt final |
 | 8 | Pot.(W) | ✅ | Potència objectiu |
-| 9 | Vel.(km/h) | ❌ | Calculada post-▶ |
-| 10 | Temps | ❌ | Temps del tram (h:min:s) |
-| 11 | Temps acum. | ❌ | Temps acumulat des de la sortida |
+| 9 | Terreny | ✅ | Factor de terreny [0.05, 2.0]; 1.0 = asfaltat. Editor SpinBox (pas 0.05). |
+| 10 | Vel.(km/h) | ❌ | Calculada post-▶ |
+| 11 | Temps | ❌ | Temps del tram (h:min:s) |
+| 12 | Temps acum. | ❌ | Temps acumulat des de la sortida |
 
 ---
 
@@ -186,9 +192,10 @@ Separació mínima entre divisors: 5 punts GPX.
 2. **Ajustar divisors** al gràfic (arrossegar o clic dret)
 3. **Afegir parades** des del gràfic (clic dret → "Afegir parada aquí")
 4. **Editar potències** a la taula de trams
-5. **▶ Calcular** → omple velocitats, temps i temps acumulats
-6. **📋 Desar pla** → guarda la planificació al `.plan.xml`
-7. **💾 Exportar GPX** → genera el track amb timestamps per al Garmin
+5. **Editar factor de terreny** per als trams amb ferm difícil (< 1.0) o ràpid (> 1.0)
+6. **▶ Calcular** → omple velocitats, temps i temps acumulats
+7. **📋 Desar pla** → guarda la planificació al `.plan.xml`
+8. **💾 Exportar GPX** → genera el track amb timestamps per al Garmin
 
 ---
 

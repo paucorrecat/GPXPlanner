@@ -15,6 +15,13 @@
 class GPXParser {
 public:
 
+    struct WayPoint {
+        double  lat;
+        double  lon;
+        double  elevM;
+        QString name;
+    };
+
     // ── Lectura ──────────────────────────────────────────────────────────────
 
     static QVector<TrackPoint> loadGPX(const QString& filePath, QString& errorOut)
@@ -79,7 +86,8 @@ public:
         QVector<TrackPoint>& points,
         const QDateTime& startTime,
         const QString& filePath,
-        const QString& trackName = "Track planificat")
+        const QString& trackName = "Track planificat",
+        const QVector<WayPoint>& waypoints = {})
     {
         QFile file(filePath);
         if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
@@ -94,6 +102,15 @@ public:
         xml.writeAttribute("creator",   "GPXPlanner Qt");
         xml.writeAttribute("xmlns",     "http://www.topografix.com/GPX/1/1");
         xml.writeAttribute("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance");
+
+        for (const WayPoint& wpt : waypoints) {
+            xml.writeStartElement("wpt");
+            xml.writeAttribute("lat", QString::number(wpt.lat, 'f', 8));
+            xml.writeAttribute("lon", QString::number(wpt.lon, 'f', 8));
+            xml.writeTextElement("ele",  QString::number(wpt.elevM, 'f', 1));
+            xml.writeTextElement("name", wpt.name);
+            xml.writeEndElement(); // wpt
+        }
 
         xml.writeStartElement("trk");
         xml.writeTextElement("name", trackName);

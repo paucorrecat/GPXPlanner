@@ -78,7 +78,25 @@ public:
     // ── Exportació ────────────────────────────────────────────────────────────
 
     bool exportGPX(const QString& outputPath, const QString& trackName = "Track planificat") {
-        return GPXParser::exportWithTimestamps(m_points, m_startTime, outputPath, trackName);
+        QVector<GPXParser::WayPoint> waypoints;
+        for (const TrackSegment& seg : m_segments) {
+            int endIdx = qMin(seg.endIdx, m_points.size() - 1);
+            if (endIdx < 0) continue;
+            const TrackPoint& endPt = m_points[endIdx];
+            if (!endPt.time.isValid()) continue;
+
+            qint64 sec = m_startTime.secsTo(endPt.time);
+            int h = static_cast<int>(sec / 3600);
+            int m = static_cast<int>((sec % 3600) / 60);
+
+            GPXParser::WayPoint wpt;
+            wpt.lat   = endPt.lat;
+            wpt.lon   = endPt.lon;
+            wpt.elevM = endPt.elevM;
+            wpt.name  = QString("%1 h %2  -  %1 h %2").arg(h).arg(m);
+            waypoints.append(wpt);
+        }
+        return GPXParser::exportWithTimestamps(m_points, m_startTime, outputPath, trackName, waypoints);
     }
 
     QString lastError() const { return m_lastError; }

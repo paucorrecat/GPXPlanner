@@ -744,16 +744,107 @@ void MainWindow::onDivisorAdded(int pt)
     while (ins<m_divisors.size() && m_divisors[ins]<pt) ++ins;
     if (ins>0 && pt-m_divisors[ins-1]<GAP) return;
     if (ins<m_divisors.size() && m_divisors[ins]-pt<GAP) return;
+
+    // Capturem potència i terreny de tots els segments actuals abans de la inserció.
+    // rebuildSegmentTable reutilitza oldValues[i] per a la fila i, però en inserir
+    // un nou segment a ins+1, les files ins+1..N queden desplaçades incorrectament.
+    QVector<double> oldPowers, oldTerrains;
+    for (int i=0; i<m_segTable->rowCount(); ++i) {
+        oldPowers   << (m_segTable->item(i,ColPower)   ? m_segTable->item(i,ColPower)->text().toDouble()   : 150.0);
+        oldTerrains << (m_segTable->item(i,ColTerrain) ? m_segTable->item(i,ColTerrain)->text().toDouble() : 1.0);
+    }
+
     m_divisors.insert(ins,pt);
-    rebuildSegmentTable(); redrawDivisors(); autoSaveTmp();
+    rebuildSegmentTable();
+
+    // Corregim les files afectades per la inserció:
+    //   ins+1 (meitat dreta del tram dividit) → hereda els valors del tram original (ins)
+    //   ins+2..N-1                            → cada una agafa els valors de la fila i-1
+    for (int i=ins+1; i<m_segTable->rowCount(); ++i) {
+        int src = (i == ins+1) ? ins : i-1;
+        if (src < oldPowers.size()) {
+            if (m_segTable->item(i,ColPower))
+                m_segTable->item(i,ColPower)->setText(QString::number(oldPowers[src],'f',0));
+            if (m_segTable->item(i,ColTerrain))
+                m_segTable->item(i,ColTerrain)->setText(QString::number(oldTerrains[src],'f',2));
+        }
+    }
+
+    redrawDivisors(); autoSaveTmp();
     setStatus(QString("Tram afegit. Ara hi ha %1 trams.").arg(m_divisors.size()+1));
 }
 
 void MainWindow::onDivisorRemoved(int di)
 {
     if (di<0||di>=m_divisors.size()) return;
+
+    // Capturem totes les potències i factors de terreny actuals.
+    QVector<double> oldPowers, oldTerrains;
+    for (int i=0; i<m_segTable->rowCount(); ++i) {
+        oldPowers   << (m_segTable->item(i,ColPower)   ? m_segTable->item(i,ColPower)->text().toDouble()   : 150.0);
+        oldTerrains << (m_segTable->item(i,ColTerrain) ? m_segTable->item(i,ColTerrain)->text().toDouble() : 1.0);
+    }
+
+    // Longituds dels dos trams que es fusionen (di i di+1).
+    QVector<int> boundaries = {0};
+    for (int d : m_divisors) boundaries.append(d);
+    boundaries.append(m_totalPoints-1);
+
+    double distA = m_cumDistKm[boundaries[di+1]] - m_cumDistKm[boundaries[di]];
+    double distB = m_cumDistKm[boundaries[di+2]] - m_cumDistKm[boundaries[di+1]];
+    double totalDist = distA + distB;
+
+    double powerA   = oldPowers[di];
+    double powerB   = oldPowers[di+1];
+    double terrainA = oldTerrains[di];
+    double terrainB = oldTerrains[di+1];
+
+    // Terreny: mitjana ponderada per distància.
+    double newTerrain = (totalDist > 0)
+                      ? (terrainA * distA + terrainB * distB) / totalDist
+                      : (terrainA + terrainB) / 2.0;
+
+    // Potència: mitjana ponderada per temps estimat (si hi ha càlcul previ),
+    // sinó per distància.
+    double newPower;
+    const auto& planSegs = m_planner.segments();
+    if (planSegs.size() == m_divisors.size()+1
+        && planSegs[di].estimatedTimeSec > 0
+        && planSegs[di+1].estimatedTimeSec > 0)
+    {
+        double timeA  = planSegs[di].estimatedTimeSec;
+        double timeB  = planSegs[di+1].estimatedTimeSec;
+        double totalT = timeA + timeB;
+        newPower = (powerA * timeA + powerB * timeB) / totalT;
+    } else {
+        newPower = (totalDist > 0)
+                 ? (powerA * distA + powerB * distB) / totalDist
+                 : (powerA + powerB) / 2.0;
+    }
+
     m_divisors.remove(di);
-    rebuildSegmentTable(); redrawDivisors(); autoSaveTmp();
+    rebuildSegmentTable();
+
+    // Corregim les files afectades:
+    //   di        → valors fusionats calculats
+    //   di+1..N-2 → cada fila i agafa els valors de l'antiga fila i+1
+    //   (rebuildSegmentTable assigna oldValues[i] a la fila i, que no té en compte
+    //    la fusió i deixa les files di+1 en endavant desplaçades una posició)
+    if (m_segTable->item(di, ColPower))
+        m_segTable->item(di, ColPower)->setText(QString::number(newPower, 'f', 0));
+    if (m_segTable->item(di, ColTerrain))
+        m_segTable->item(di, ColTerrain)->setText(QString::number(newTerrain, 'f', 2));
+    for (int i=di+1; i<m_segTable->rowCount(); ++i) {
+        int src = i+1;
+        if (src < oldPowers.size()) {
+            if (m_segTable->item(i, ColPower))
+                m_segTable->item(i, ColPower)->setText(QString::number(oldPowers[src], 'f', 0));
+            if (m_segTable->item(i, ColTerrain))
+                m_segTable->item(i, ColTerrain)->setText(QString::number(oldTerrains[src], 'f', 2));
+        }
+    }
+
+    redrawDivisors(); autoSaveTmp();
     setStatus(QString("Divisor eliminat. Ara hi ha %1 trams.").arg(m_divisors.size()+1));
 }
 
