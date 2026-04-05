@@ -25,6 +25,7 @@
 #include <QCloseEvent>
 #include <QScatterSeries>
 #include <QLineSeries>
+#include <algorithm>
 
 // ── Colors estàtics ───────────────────────────────────────────────────────────
 const QList<QColor> MainWindow::k_segColors = {
@@ -202,6 +203,7 @@ QWidget* MainWindow::buildSegmentsPanel()
         "Vel.(km/h)", "Temps", "Temps acum."
     });
     m_segTable->setItemDelegateForColumn(ColTerrain, new TerrainDelegate(m_segTable));
+    connect(m_segTable, &QTableWidget::cellChanged, this, &MainWindow::onSegTableCellChanged);
     m_segTable->horizontalHeader()->setSectionResizeMode(ColName, QHeaderView::Stretch);
     m_segTable->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
     m_segTable->setAlternatingRowColors(false);   // els colors de fila els posem nosaltres
@@ -451,6 +453,8 @@ void MainWindow::rebuildSegmentTable()
 {
     if (m_loadedPoints.isEmpty()) return;
 
+    m_segTable->blockSignals(true);
+
     QVector<QString> oldNames;
     QVector<double>  oldPowers;
     QVector<double>  oldTerrains;
@@ -500,7 +504,11 @@ void MainWindow::rebuildSegmentTable()
         rw(ColName, name, bgName);
 
         ro(ColPkStart, QString::number(m_cumDistKm[s0],'f',2));
-        ro(ColPkEnd,   QString::number(m_cumDistKm[qMin(s1,m_totalPoints-1)],'f',2));
+        // Pk fi: editable per a tots els trams excepte l'últim (el seu final és fix)
+        if (i < nSeg-1)
+            rw(ColPkEnd, QString::number(m_cumDistKm[qMin(s1,m_totalPoints-1)],'f',2));
+        else
+            ro(ColPkEnd, QString::number(m_cumDistKm[qMin(s1,m_totalPoints-1)],'f',2));
 
         if (!segs.isEmpty()) {
             const auto& seg = segs[0];
@@ -521,6 +529,7 @@ void MainWindow::rebuildSegmentTable()
         ro(ColCumTime, "—");
     }
 
+    m_segTable->blockSignals(false);
     updateSegCountDisplay();
     updateSummaryLabels();
 }
@@ -721,6 +730,62 @@ void MainWindow::applyPlan(const PlanSerializer::Plan& plan)
 // ─────────────────────────────────────────────────────────────────────────────
 //  SLOTS — ElevationChartView
 // ─────────────────────────────────────────────────────────────────────────────
+void MainWindow::onSegTableCellChanged(int row, int col)
+{
+    if (col != ColPkEnd) return;
+    if (m_cumDistKm.isEmpty()) return;
+    // Només trams que tenen divisor (no l'últim)
+    if (row >= m_divisors.size()) return;
+
+    auto* it = m_segTable->item(row, col);
+    if (!it) return;
+
+    bool ok;
+    double km = it->text().replace(',','.').toDouble(&ok);
+
+    QVector<int> boundaries = {0};
+    for (int d : m_divisors) boundaries.append(d);
+    boundaries.append(m_totalPoints-1);
+
+    // Rang factible: estrictament entre inici del tram actual i inici del tram següent al següent
+    double minKm = m_cumDistKm[boundaries[row]];
+    double maxKm = m_cumDistKm[boundaries[row+2]];
+
+    if (!ok || km <= minKm || km >= maxKm) {
+        // Valor no factible: restaura el valor original i avisa
+        m_segTable->blockSignals(true);
+        it->setText(QString::number(m_cumDistKm[m_divisors[row]],'f',2));
+        m_segTable->blockSignals(false);
+        setStatus(QString("Pk fi fora de rang: ha d'estar entre %1 i %2 km.")
+                  .arg(minKm,0,'f',2).arg(maxKm,0,'f',2), true);
+        return;
+    }
+
+    // Troba el punt GPX més proper al km introduït
+    // Binary search sobre m_cumDistKm
+    auto it2 = std::lower_bound(m_cumDistKm.begin(), m_cumDistKm.end(), km);
+    int idx = static_cast<int>(it2 - m_cumDistKm.begin());
+    if (idx > 0 && idx < m_cumDistKm.size()) {
+        // Tria el veí més proper
+        if (std::abs(m_cumDistKm[idx-1] - km) < std::abs(m_cumDistKm[idx] - km))
+            --idx;
+    }
+    idx = qBound(boundaries[row]+1, idx, boundaries[row+2]-1);
+
+    if (idx == m_divisors[row]) {
+        // Cap canvi real; restaura text amb el valor exacte
+        m_segTable->blockSignals(true);
+        it->setText(QString::number(m_cumDistKm[idx],'f',2));
+        m_segTable->blockSignals(false);
+        return;
+    }
+
+    m_divisors[row] = idx;
+    rebuildSegmentTable();
+    redrawDivisors();
+    autoSaveTmp();
+}
+
 void MainWindow::onDivisorMoved(int di, int newPt)
 {
     if (di<0 || di>=m_divisors.size()) return;

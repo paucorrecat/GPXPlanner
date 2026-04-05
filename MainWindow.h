@@ -99,6 +99,7 @@ private slots:
     void onDivisorRemoved(int divisorIdx);
     void onStopAdded(int pointIdx);
     void onStopRemoved(int stopIdx);
+    void onSegTableCellChanged(int row, int col);
 
 private:
     // ── UI builders ──────────────────────────────────────────────────────────
