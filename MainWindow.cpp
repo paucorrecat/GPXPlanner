@@ -931,6 +931,10 @@ void MainWindow::onLoadGPX()
     m_settings.setValue("lastInputPath",path);
     m_settings.setValue("lastInputDir",QFileInfo(path).absolutePath());
 
+    // Proposa nom de sortida basat en el fitxer d'entrada
+    QFileInfo fi(path);
+    m_outputPath->setText(fi.dir().filePath(fi.baseName()+"_planificat.gpx"));
+
     updateElevationChart(m_loadedPoints);
     rebuildSegmentTable();
     redrawDivisors();
