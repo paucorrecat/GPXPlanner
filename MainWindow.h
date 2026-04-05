@@ -22,6 +22,7 @@ class QDoubleSpinBox;
 class QLabel;
 class QSplitter;
 class QGroupBox;
+class QProgressDialog;
 QT_END_NAMESPACE
 
 // ── Delegat SpinBox per a la columna Terreny ──────────────────────────────────
@@ -125,7 +126,9 @@ private:
     void redrawDivisors();
     void updateSummaryLabels();
     void updateSegCountDisplay();
-    void updateElevationChart(const QVector<TrackPoint>& points);
+    void updateElevationChart(const QVector<TrackPoint>& points,
+                              QProgressDialog* prog = nullptr,
+                              int progBase = 0, int progEnd = 0);
     void setStatus(const QString& msg, bool error = false);
     void updateTitleBar();
 

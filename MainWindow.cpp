@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include <QApplication>
+#include <QProgressDialog>
 #include <QWidget>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -357,26 +358,40 @@ QWidget* MainWindow::buildElevationChart()
 // ─────────────────────────────────────────────────────────────────────────────
 //  ELEVATION CHART UPDATE
 // ─────────────────────────────────────────────────────────────────────────────
-void MainWindow::updateElevationChart(const QVector<TrackPoint>& points)
+void MainWindow::updateElevationChart(const QVector<TrackPoint>& points,
+                                      QProgressDialog* prog, int progBase, int progEnd)
 {
     if (points.isEmpty()) return;
-    m_upperLine->clear(); m_lowerLine->clear();
+
+    const int n = points.size();
+    QVector<QPointF> upper, lower;
+    upper.reserve(n); lower.reserve(n);
 
     double minElev = points[0].elevM, maxElev = points[0].elevM;
-    m_upperLine->append(0.0, points[0].elevM);
-    m_lowerLine->append(0.0, 0.0);
+    const int reportStep = qMax(1, n / (progEnd - progBase > 0 ? (progEnd - progBase) : 1));
 
-    for (int i=1; i<points.size(); ++i) {
+    for (int i = 0; i < n; ++i) {
         double km = m_cumDistKm[i], e = points[i].elevM;
-        m_upperLine->append(km, e); m_lowerLine->append(km, 0.0);
-        minElev = qMin(minElev,e); maxElev = qMax(maxElev,e);
+        upper.append({km, e});
+        lower.append({km, 0.0});
+        minElev = qMin(minElev, e); maxElev = qMax(maxElev, e);
+
+        if (prog && (i % reportStep == 0)) {
+            prog->setValue(progBase + (i * (progEnd - progBase)) / n);
+            QApplication::processEvents();
+        }
     }
-    double margin = qMax((maxElev-minElev)*0.15, 10.0);
+
+    // replace() actualitza la sèrie en un sol cop (molt més ràpid que append per append)
+    m_upperLine->replace(upper);
+    m_lowerLine->replace(lower);
+
+    double margin = qMax((maxElev - minElev) * 0.15, 10.0);
     double xMax   = m_cumDistKm.last();
     m_axisX->setRange(0, xMax);
-    m_axisY->setRange(qMax(0.0, minElev-margin), maxElev+margin);
+    m_axisY->setRange(qMax(0.0, minElev - margin), maxElev + margin);
     m_chartView->resetZoomRange(0, xMax);
-    m_chartView->resetYRange(qMax(0.0, minElev-margin), maxElev+margin);
+    m_chartView->resetYRange(qMax(0.0, minElev - margin), maxElev + margin);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -984,39 +999,67 @@ void MainWindow::onLoadGPX()
     if (path.isEmpty()) { onBrowseInput(); path=m_inputPath->text().trimmed(); }
     if (path.isEmpty()) return;
 
-    if (!m_planner.loadGPX(path)) {
-        setStatus("Error carregant GPX: "+m_planner.lastError(), true); return;
-    }
+    QProgressDialog prog("Carregant fitxer GPX…", QString(), 0, 7, this);
+    prog.setWindowTitle("Carregant…");
+    prog.setWindowModality(Qt::WindowModal);
+    prog.setMinimumDuration(0);
+    prog.setValue(0);
+    QApplication::processEvents();
+
+    // Pas 1: llegir punts GPX
+    prog.setLabelText("Llegint punts GPX…");
+    prog.setValue(1); QApplication::processEvents();
     QString err;
-    m_loadedPoints=GPXParser::loadGPX(path,err);
+    m_loadedPoints = GPXParser::loadGPX(path, err);
     if (m_loadedPoints.isEmpty()) {
         setStatus("El fitxer no conté punts vàlids.",true); return;
     }
-    m_totalPoints=m_loadedPoints.size();
-    m_currentGpxPath=path;
 
+    // Pas 2: carregar al planificador
+    prog.setLabelText("Inicialitzant planificador…");
+    prog.setValue(2); QApplication::processEvents();
+    if (!m_planner.loadGPX(path)) {
+        setStatus("Error carregant GPX: "+m_planner.lastError(), true); return;
+    }
+
+    m_totalPoints    = m_loadedPoints.size();
+    m_currentGpxPath = path;
+
+    // Pas 3: calcular distàncies acumulades
+    prog.setLabelText("Calculant distàncies…");
+    prog.setValue(3); QApplication::processEvents();
     m_cumDistKm.resize(m_totalPoints);
-    m_cumDistKm[0]=0.0;
-    for (int i=1;i<m_totalPoints;++i)
-        m_cumDistKm[i]=m_cumDistKm[i-1]+m_loadedPoints[i-1].distanceTo(m_loadedPoints[i])/1000.0;
+    m_cumDistKm[0] = 0.0;
+    for (int i=1; i<m_totalPoints; ++i)
+        m_cumDistKm[i] = m_cumDistKm[i-1]
+                       + m_loadedPoints[i-1].distanceTo(m_loadedPoints[i]) / 1000.0;
 
     // Divisors inicials per defecte (3 trams)
     m_divisors.clear(); m_stops.clear(); m_stopTable->setRowCount(0);
-    int step=m_totalPoints/3;
-    if (step>0) { m_divisors.append(step); m_divisors.append(step*2); }
+    int step = m_totalPoints / 3;
+    if (step > 0) { m_divisors.append(step); m_divisors.append(step*2); }
 
-    m_settings.setValue("lastInputPath",path);
-    m_settings.setValue("lastInputDir",QFileInfo(path).absolutePath());
+    m_settings.setValue("lastInputPath", path);
+    m_settings.setValue("lastInputDir",  QFileInfo(path).absolutePath());
 
     // Proposa nom de sortida basat en el fitxer d'entrada
     QFileInfo fi(path);
     m_outputPath->setText(fi.dir().filePath(fi.baseName()+"_planificat.gpx"));
 
-    updateElevationChart(m_loadedPoints);
+    // Pas 4-6: gràfic d'elevació (ocupa la majoria del temps, rep el rang complet)
+    prog.setLabelText("Construint gràfic d'elevació…");
+    prog.setValue(4); QApplication::processEvents();
+    updateElevationChart(m_loadedPoints, &prog, 4, 6);
+
+    // Pas 6: taula de trams
+    prog.setLabelText("Construint taula de trams…");
+    prog.setValue(6); QApplication::processEvents();
     rebuildSegmentTable();
     redrawDivisors();
 
-    // Intenta carregar pla existent (temporal primer, després definitiu)
+    // Pas 7: pla existent
+    prog.setLabelText("Comprovant pla existent…");
+    prog.setValue(7); QApplication::processEvents();
     if (PlanSerializer::hasPlan(path)) {
         PlanSerializer::Plan plan;
         if (PlanSerializer::load(path, plan)) {
