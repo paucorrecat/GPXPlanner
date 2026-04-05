@@ -71,7 +71,6 @@ void MainWindow::buildUI()
 
     auto* vSplit = new QSplitter(Qt::Vertical);
     vSplit->setChildrenCollapsible(false);
-    vSplit->addWidget(buildElevationChart());
 
     auto* midSplit = new QSplitter(Qt::Horizontal);
     midSplit->addWidget(buildRiderPanel());
@@ -80,6 +79,8 @@ void MainWindow::buildUI()
     midSplit->setStretchFactor(1,2);
     vSplit->addWidget(midSplit);
 
+    vSplit->addWidget(buildElevationChart());
+
     auto* botSplit = new QSplitter(Qt::Vertical);
     botSplit->addWidget(buildSegmentsPanel());
     botSplit->addWidget(buildStopsPanel());
@@ -87,7 +88,7 @@ void MainWindow::buildUI()
     botSplit->setStretchFactor(1,1);
     vSplit->addWidget(botSplit);
 
-    vSplit->setSizes({220, 160, 320});
+    vSplit->setSizes({160, 220, 320});
     root->addWidget(vSplit, 1);
 
     m_statusBar = new QLabel("Carrega un fitxer GPX per començar.");
@@ -132,13 +133,7 @@ QWidget* MainWindow::buildFilePanel()
     connect(m_btnExport, &QPushButton::clicked, this, &MainWindow::onExport);
     g->addWidget(m_btnExport, 1, 3);
 
-    // Fila 2: hora sortida + Calcular + Desar pla
-    g->addWidget(new QLabel("Hora de sortida:"), 2, 0);
-    m_startTime = new QDateTimeEdit(QDateTime::currentDateTime());
-    m_startTime->setDisplayFormat("dd/MM/yyyy  HH:mm");
-    m_startTime->setCalendarPopup(true);
-    g->addWidget(m_startTime, 2, 1);
-
+    // Fila 2: botons d'acció
     m_btnCompute = new QPushButton("▶  Calcular");
     m_btnCompute->setEnabled(false);
     m_btnCompute->setStyleSheet(
@@ -255,7 +250,8 @@ QWidget* MainWindow::buildSummaryPanel()
 {
     auto* box = new QGroupBox("Resum");
     auto* g   = new QGridLayout(box);
-    g->setVerticalSpacing(4);
+    g->setVerticalSpacing(6);
+    g->setHorizontalSpacing(8);
 
     auto mkVal = []() {
         auto* l = new QLabel("—");
@@ -265,22 +261,36 @@ QWidget* MainWindow::buildSummaryPanel()
         return l;
     };
 
-    int row = 0;
-    auto add = [&](const QString& lbl, QLabel*& out) {
-        g->addWidget(new QLabel(lbl), row, 0);
-        out = mkVal(); g->addWidget(out, row, 1); ++row;
-    };
+    // Fila 0: Trams | Distància total
+    g->addWidget(new QLabel("Trams:"),           0, 0);
+    m_lblNSegs = mkVal();     g->addWidget(m_lblNSegs,     0, 1);
+    g->addWidget(new QLabel("Distància total:"), 0, 2);
+    m_lblTotalDist = mkVal(); g->addWidget(m_lblTotalDist, 0, 3);
 
-    add("Trams:",             m_lblNSegs);
-    add("Distància total:",   m_lblTotalDist);
-    add("D+ total:",          m_lblTotalDplus);
-    add("D− total:",          m_lblTotalDminus);
-    add("Temps total:",       m_lblTotalTime);
-    add("Velocitat mitjana:", m_lblAvgSpeed);
-    add("Hora d'arribada:",   m_lblArrival);
+    // Fila 1: D+ | D-
+    g->addWidget(new QLabel("D+ total:"),        1, 0);
+    m_lblTotalDplus  = mkVal(); g->addWidget(m_lblTotalDplus,  1, 1);
+    g->addWidget(new QLabel("D− total:"),        1, 2);
+    m_lblTotalDminus = mkVal(); g->addWidget(m_lblTotalDminus, 1, 3);
 
-    g->setRowStretch(row, 1);
+    // Fila 2: Hora sortida (editable) | Hora d'arribada
+    g->addWidget(new QLabel("Hora de sortida:"), 2, 0);
+    m_startTime = new QDateTimeEdit(QDateTime::currentDateTime());
+    m_startTime->setDisplayFormat("dd/MM/yyyy  HH:mm");
+    m_startTime->setCalendarPopup(true);
+    g->addWidget(m_startTime, 2, 1);
+    g->addWidget(new QLabel("Hora d'arribada:"), 2, 2);
+    m_lblArrival = mkVal(); g->addWidget(m_lblArrival, 2, 3);
+
+    // Fila 3: Temps total | Velocitat mitjana
+    g->addWidget(new QLabel("Temps total:"),     3, 0);
+    m_lblTotalTime = mkVal(); g->addWidget(m_lblTotalTime, 3, 1);
+    g->addWidget(new QLabel("Velocitat mitja:"), 3, 2);
+    m_lblAvgSpeed  = mkVal(); g->addWidget(m_lblAvgSpeed,  3, 3);
+
+    g->setRowStretch(4, 1);
     g->setColumnStretch(1, 1);
+    g->setColumnStretch(3, 1);
     return box;
 }
 
@@ -338,6 +348,7 @@ QWidget* MainWindow::buildElevationChart()
     connect(m_chartView, &ElevationChartView::divisorRemoved, this, &MainWindow::onDivisorRemoved);
     connect(m_chartView, &ElevationChartView::stopAdded,      this, &MainWindow::onStopAdded);
     connect(m_chartView, &ElevationChartView::stopRemoved,    this, &MainWindow::onStopRemoved);
+    connect(m_chartView, &ElevationChartView::zoomReset,      this, &MainWindow::redrawDivisors);
 
     v->addWidget(m_chartView);
     return box;
@@ -365,6 +376,7 @@ void MainWindow::updateElevationChart(const QVector<TrackPoint>& points)
     m_axisX->setRange(0, xMax);
     m_axisY->setRange(qMax(0.0, minElev-margin), maxElev+margin);
     m_chartView->resetZoomRange(0, xMax);
+    m_chartView->resetYRange(qMax(0.0, minElev-margin), maxElev+margin);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

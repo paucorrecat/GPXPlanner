@@ -17,7 +17,8 @@
  *  - Drag divisor (botó esquerre sobre barra ±10px)
  *  - Pan horitzontal (drag espai buit)
  *  - Ctrl+Scroll → zoom horitzontal centrat al cursor
- *  - Doble clic  → reset zoom
+ *  - Drag vertical sobre eix Y → zoom vertical (amunt=in, avall=out)
+ *  - Doble clic  → reset zoom X i Y
  *  - Clic dret   → menú contextual unificat (tram / parada / eliminar)
  */
 class ElevationChartView : public QChartView
@@ -52,24 +53,39 @@ public:
         m_fullXMin = xMin; m_fullXMax = xMax;
     }
 
+    void resetYRange(double yMin, double yMax)
+    {
+        m_fullYMin = yMin; m_fullYMax = yMax;
+    }
+
 signals:
     void divisorMoved(int divisorIdx, int newPointIdx);
     void divisorAdded(int pointIdx);
     void divisorRemoved(int divisorIdx);
     void stopAdded(int pointIdx);
     void stopRemoved(int stopIdx);
+    void zoomReset();
 
 protected:
 
     void mousePressEvent(QMouseEvent* event) override
     {
         if (event->button() == Qt::LeftButton) {
+            // Zoom vertical: drag sobre la zona de l'eix Y
+            if (isOnYAxis(event->pos())) {
+                m_yZoomActive = true;
+                m_yZoomLastY  = event->pos().y();
+                setCursor(Qt::SizeVerCursor);
+                event->accept(); return;
+            }
             int di = divisorAt(event->pos());
             if (di >= 0) {
                 m_dragDivisorIdx = di; m_draggingDivisor = true;
                 setCursor(Qt::SizeHorCursor); event->accept(); return;
             }
-            m_panActive = true; m_panLastX = event->pos().x();
+            m_panActive = true;
+            m_panLastX = event->pos().x();
+            m_panLastY = event->pos().y();
             setCursor(Qt::OpenHandCursor); event->accept(); return;
         }
         QChartView::mousePressEvent(event);
@@ -77,26 +93,44 @@ protected:
 
     void mouseMoveEvent(QMouseEvent* event) override
     {
+        if (m_yZoomActive && m_axisY) {
+            int dy = event->pos().y() - m_yZoomLastY;
+            m_yZoomLastY = event->pos().y();
+            if (dy) applyYZoom(dy);
+            event->accept(); return;
+        }
         if (m_draggingDivisor && m_dragDivisorIdx >= 0) {
             int pt = pixelToPointIndex(event->pos().x());
             if (pt >= 0) emit divisorMoved(m_dragDivisorIdx, pt);
             event->accept(); return;
         }
-        if (m_panActive && m_axisX) {
+        if (m_panActive) {
             int dx = event->pos().x() - m_panLastX;
+            int dy = event->pos().y() - m_panLastY;
             m_panLastX = event->pos().x();
-            if (dx) applyPan(-dx);
+            m_panLastY = event->pos().y();
+            applyPan(-dx, dy);
             event->accept(); return;
         }
-        int di = divisorAt(event->pos());
-        if (di >= 0) setCursor(Qt::SizeHorCursor);
-        else if (stopAt(event->pos()) >= 0) setCursor(Qt::PointingHandCursor);
-        else setCursor(Qt::ArrowCursor);
+        // Cursors hover
+        if (isOnYAxis(event->pos())) {
+            setCursor(Qt::SizeVerCursor);
+        } else {
+            int di = divisorAt(event->pos());
+            if (di >= 0) setCursor(Qt::SizeHorCursor);
+            else if (stopAt(event->pos()) >= 0) setCursor(Qt::PointingHandCursor);
+            else setCursor(Qt::ArrowCursor);
+        }
         QChartView::mouseMoveEvent(event);
     }
 
     void mouseReleaseEvent(QMouseEvent* event) override
     {
+        if (m_yZoomActive) {
+            m_yZoomActive = false;
+            setCursor(Qt::ArrowCursor);
+            event->accept(); return;
+        }
         if (m_draggingDivisor) {
             m_draggingDivisor = false; m_dragDivisorIdx = -1;
             setCursor(Qt::ArrowCursor); event->accept(); return;
@@ -110,8 +144,10 @@ protected:
 
     void mouseDoubleClickEvent(QMouseEvent* event) override
     {
-        if (event->button() == Qt::LeftButton && m_axisX) {
-            m_axisX->setRange(m_fullXMin, m_fullXMax);
+        if (event->button() == Qt::LeftButton) {
+            if (m_axisX) m_axisX->setRange(m_fullXMin, m_fullXMax);
+            if (m_axisY) m_axisY->setRange(m_fullYMin, m_fullYMax);
+            emit zoomReset();
             event->accept(); return;
         }
         QChartView::mouseDoubleClickEvent(event);
@@ -166,6 +202,27 @@ protected:
     }
 
 private:
+    bool isOnYAxis(const QPoint& pos) const
+    {
+        if (!m_axisY) return false;
+        QRectF plot = chart()->plotArea();
+        return pos.x() < plot.left()
+            && pos.y() >= plot.top()
+            && pos.y() <= plot.bottom();
+    }
+
+    void applyYZoom(int dy)
+    {
+        if (!m_axisY) return;
+        double factor   = qBound(0.2, 1.0 + dy * 0.005, 5.0);
+        double lo       = m_axisY->min(), hi = m_axisY->max();
+        double mid      = (lo + hi) * 0.5;
+        double newRange = qMax(10.0, (hi - lo) * factor);
+        double newLo    = mid - newRange * 0.5;
+        double newHi    = mid + newRange * 0.5;
+        m_axisY->setRange(newLo, newHi);
+    }
+
     int pixelToPointIndex(int px) const
     {
         if (m_cumDistKm.isEmpty() || !m_axisX) return -1;
@@ -204,14 +261,22 @@ private:
         return -1;
     }
 
-    void applyPan(int dPixel)
+    void applyPan(int dPixelX, int dPixelY = 0)
     {
-        if (!m_axisX) return;
-        double lo=m_axisX->min(), hi=m_axisX->max(), range=hi-lo;
-        double dKm = chart()->mapToValue(mapToScene(QPoint(dPixel,0))).x()
-                   - chart()->mapToValue(mapToScene(QPoint(0,0))).x();
-        double newLo = qBound(m_fullXMin, lo+dKm, m_fullXMax-range);
-        m_axisX->setRange(newLo, newLo+range);
+        if (m_axisX && dPixelX) {
+            double lo=m_axisX->min(), hi=m_axisX->max(), range=hi-lo;
+            double dKm = chart()->mapToValue(mapToScene(QPoint(dPixelX,0))).x()
+                       - chart()->mapToValue(mapToScene(QPoint(0,0))).x();
+            double newLo = qBound(m_fullXMin, lo+dKm, m_fullXMax-range);
+            m_axisX->setRange(newLo, newLo+range);
+        }
+        if (m_axisY && dPixelY) {
+            double lo=m_axisY->min(), hi=m_axisY->max(), range=hi-lo;
+            // Pantalla: Y creix cap avall. Rang Y: valors alts a dalt.
+            // Moure amunt (dPixelY<0) → dVal<0 → lo+dVal baixa el rang → corba puja ✓
+            double dVal = dPixelY * range / chart()->plotArea().height();
+            m_axisY->setRange(lo + dVal, hi + dVal);
+        }
     }
 
     static constexpr int SNAP_PX = 10;
@@ -221,8 +286,12 @@ private:
     int             m_totalPoints = 0;
     QValueAxis     *m_axisX = nullptr, *m_axisY = nullptr;
     double          m_fullXMin = 0.0, m_fullXMax = 1.0;
+    double          m_fullYMin = 0.0, m_fullYMax = 1.0;
     bool            m_draggingDivisor = false;
     int             m_dragDivisorIdx  = -1;
-    bool            m_panActive = false;
-    int             m_panLastX  = 0;
+    bool            m_panActive  = false;
+    int             m_panLastX   = 0;
+    int             m_panLastY   = 0;
+    bool            m_yZoomActive = false;
+    int             m_yZoomLastY  = 0;
 };
