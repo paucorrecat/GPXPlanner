@@ -16,6 +16,7 @@ struct TrackPoint {
     double lat       = 0.0;
     double lon       = 0.0;
     double elevM     = 0.0;   // elevació en metres
+    bool   hasEle    = false;  // true si el trkpt tenia element <ele> al GPX original
     QDateTime time;           // s'omplirà en l'exportació
 
     // Distància haversine fins a un altre punt (metres)

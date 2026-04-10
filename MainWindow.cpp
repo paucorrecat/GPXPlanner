@@ -135,6 +135,15 @@ QWidget* MainWindow::buildFilePanel()
     g->addWidget(m_btnExport, 1, 3);
 
     // Fila 2: botons d'acció
+    m_btnFixElevation = new QPushButton("🔧  Corregir elevació");
+    m_btnFixElevation->setEnabled(false);
+    m_btnFixElevation->setStyleSheet(
+        "font-weight:bold; background:#9C27B0; color:white; padding:4px 10px;");
+    m_btnFixElevation->setToolTip(
+        "Interpola linealment l'elevació dels punts que no tenien element <ele> al GPX original.");
+    connect(m_btnFixElevation, &QPushButton::clicked, this, &MainWindow::onFixElevation);
+    g->addWidget(m_btnFixElevation, 2, 1);
+
     m_btnCompute = new QPushButton("▶  Calcular");
     m_btnCompute->setEnabled(false);
     m_btnCompute->setStyleSheet(
@@ -1080,7 +1089,80 @@ void MainWindow::onLoadGPX()
     updateSummaryLabels();
     m_btnCompute->setEnabled(true);
     m_btnSavePlan->setEnabled(true);
+
+    // Activa el botó de correcció d'elevació si hi ha punts sense <ele>
+    bool anyMissing = std::any_of(m_loadedPoints.begin(), m_loadedPoints.end(),
+                                  [](const TrackPoint& p){ return !p.hasEle; });
+    m_btnFixElevation->setEnabled(anyMissing);
+
     updateTitleBar();
+}
+
+void MainWindow::onFixElevation()
+{
+    if (m_loadedPoints.isEmpty()) return;
+
+    const int n = m_loadedPoints.size();
+
+    // Marca quins punts eren originalment invàlids (sense <ele>)
+    QVector<bool> missing(n);
+    int totalMissing = 0;
+    for (int i = 0; i < n; ++i) {
+        missing[i] = !m_loadedPoints[i].hasEle;
+        if (missing[i]) ++totalMissing;
+    }
+    if (totalMissing == 0) {
+        setStatus("Cap punt sense elevació trobat.");
+        m_btnFixElevation->setEnabled(false);
+        return;
+    }
+
+    for (int i = 0; i < n; ++i) {
+        if (!missing[i]) continue;
+
+        // Veí vàlid anterior (original)
+        int prev = -1;
+        for (int j = i - 1; j >= 0; --j)
+            if (!missing[j]) { prev = j; break; }
+
+        // Veí vàlid posterior (original)
+        int next = -1;
+        for (int j = i + 1; j < n; ++j)
+            if (!missing[j]) { next = j; break; }
+
+        double elevInterp;
+        if (prev < 0 && next < 0) {
+            continue;  // no hi ha cap punt vàlid — cas extrem, deixem 0
+        } else if (prev < 0) {
+            elevInterp = m_loadedPoints[next].elevM;
+        } else if (next < 0) {
+            elevInterp = m_loadedPoints[prev].elevM;
+        } else {
+            double total = m_cumDistKm[next] - m_cumDistKm[prev];
+            if (total > 0.0) {
+                double dPrev = m_cumDistKm[i] - m_cumDistKm[prev];
+                double dNext = m_cumDistKm[next] - m_cumDistKm[i];
+                elevInterp = m_loadedPoints[prev].elevM * (dNext / total)
+                           + m_loadedPoints[next].elevM * (dPrev / total);
+            } else {
+                elevInterp = (m_loadedPoints[prev].elevM + m_loadedPoints[next].elevM) / 2.0;
+            }
+        }
+
+        m_loadedPoints[i].elevM  = elevInterp;
+        m_loadedPoints[i].hasEle = true;
+    }
+
+    // Sincronitza els punts corregits amb el planificador
+    m_planner.setPoints(m_loadedPoints);
+
+    // Refresca gràfic, taula de trams, resum i barra d'estat
+    updateElevationChart(m_loadedPoints);
+    rebuildSegmentTable();
+    redrawDivisors();
+    updateSummaryLabels();
+    setStatus(QString("Elevació corregida: %1 punts interpolats.").arg(totalMissing));
+    m_btnFixElevation->setEnabled(false);
 }
 
 void MainWindow::onCompute()

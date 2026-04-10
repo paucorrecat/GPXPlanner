@@ -90,6 +90,7 @@ private slots:
     void onBrowseInput();
     void onBrowseOutput();
     void onLoadGPX();
+    void onFixElevation();
     void onCompute();
     void onExport();
     void onRemoveStop();
@@ -147,6 +148,7 @@ private:
     QLineEdit*          m_inputPath      = nullptr;
     QLineEdit*          m_outputPath     = nullptr;
     QPushButton*        m_btnLoad        = nullptr;
+    QPushButton*        m_btnFixElevation = nullptr;
     QPushButton*        m_btnCompute     = nullptr;
     QPushButton*        m_btnExport      = nullptr;
     QPushButton*        m_btnSavePlan    = nullptr;

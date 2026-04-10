@@ -49,7 +49,8 @@ public:
                     current.lon = xml.attributes().value("lon").toDouble();
                 }
                 else if (inTrkpt && xml.name() == QLatin1String("ele")) {
-                    current.elevM = xml.readElementText().toDouble();
+                    current.elevM  = xml.readElementText().toDouble();
+                    current.hasEle = true;
                 }
                 else if (inTrkpt && xml.name() == QLatin1String("time")) {
                     current.time = QDateTime::fromString(

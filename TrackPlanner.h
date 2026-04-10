@@ -34,6 +34,9 @@ public:
         return !m_points.isEmpty();
     }
 
+    /** Substitueix els punts en memòria (p.ex. després de corregir elevació). */
+    void setPoints(const QVector<TrackPoint>& pts) { m_points = pts; }
+
     // ── Gestió de segments ────────────────────────────────────────────────────
 
     /**
