@@ -96,7 +96,8 @@ public:
             wpt.lat   = endPt.lat;
             wpt.lon   = endPt.lon;
             wpt.elevM = endPt.elevM;
-            wpt.name  = QString("%1 h %2  -  %1 h %2").arg(h).arg(m);
+            wpt.name  = QString("%1 h %2  -  %3 m")
+                        .arg(h).arg(m).arg(static_cast<int>(qRound(endPt.elevM)));
             waypoints.append(wpt);
         }
         return GPXParser::exportWithTimestamps(m_points, m_startTime, outputPath, trackName, waypoints);
