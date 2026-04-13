@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "SettingsDialog.h"
 
 #include <QApplication>
 #include <QMenuBar>
@@ -21,7 +22,9 @@
 #include <QDoubleSpinBox>
 #include <QSplitter>
 #include <QFileDialog>
+#include <QInputDialog>
 #include <QMessageBox>
+#include <QRegularExpression>
 #include <QFileInfo>
 #include <QFont>
 #include <QFrame>
@@ -108,6 +111,13 @@ void MainWindow::buildUI()
         "Interpola linealment l'elevació dels punts que no tenien element <ele> al GPX original.");
     connect(m_actFixElevation, &QAction::triggered, this, &MainWindow::onFixElevation);
 
+    m_actImportDem = menuEines->addAction("Importar altures DEM");
+    m_actImportDem->setShortcut(QKeySequence("F7"));
+    m_actImportDem->setEnabled(false);
+    m_actImportDem->setToolTip(
+        "Substitueix les altures del track amb dades SRTM1 (.hgt) de la carpeta DEM configurada.");
+    connect(m_actImportDem, &QAction::triggered, this, &MainWindow::onImportDemElevation);
+
     menuEines->addSeparator();
 
     auto* actSettings = menuEines->addAction("Configuració…");
@@ -133,6 +143,7 @@ void MainWindow::buildUI()
     toolBar->addAction(m_actSavePlan);
     toolBar->addSeparator();
     toolBar->addAction(m_actCompute);
+    toolBar->addAction(m_actImportDem);
     toolBar->addAction(m_actExport);
     toolBar->addAction(m_actFixElevation);
     toolBar->addSeparator();
@@ -1169,6 +1180,7 @@ void MainWindow::onLoadGPX()
     m_btnSavePlan->setEnabled(true);
     m_actCompute->setEnabled(true);
     m_actSavePlan->setEnabled(true);
+    m_actImportDem->setEnabled(true);
 
     // Activa el botó de correcció d'elevació si hi ha punts sense <ele>
     bool anyMissing = std::any_of(m_loadedPoints.begin(), m_loadedPoints.end(),
@@ -1289,6 +1301,7 @@ void MainWindow::onCompute()
     redrawDivisors();
     m_btnExport->setEnabled(true);
     m_actExport->setEnabled(true);
+    m_actImportDem->setEnabled(true);
     autoSaveTmp();
     setStatus("Càlcul completat. Revisa el resum i exporta el GPX.");
     saveSettings();
@@ -1347,6 +1360,9 @@ void MainWindow::saveSettings()
     m_settings.setValue("ftp",  m_ftp->value());
     m_settings.setValue("cda",  m_cda->value());
     m_settings.setValue("crr",  m_crr->value());
+    // demFolder es gestiona des del diàleg de configuració; assegurem el valor per defecte
+    if (!m_settings.contains("demFolder"))
+        m_settings.setValue("demFolder", QDir::homePath() + "/DEM");
 }
 
 void MainWindow::loadSettings()
@@ -1359,6 +1375,10 @@ void MainWindow::loadSettings()
     m_ftp ->setValue(m_settings.value("ftp",200.0).toDouble());
     m_cda ->setValue(m_settings.value("cda",0.40).toDouble());
     m_crr ->setValue(m_settings.value("crr",0.015).toDouble());
+    // Inicialitza demFolder amb el valor per defecte si no s'ha configurat mai
+    if (!m_settings.contains("demFolder"))
+        m_settings.setValue("demFolder", QDir::homePath() + "/DEM");
+    m_srtmReader.setFolder(m_settings.value("demFolder").toString());
     if (!li.isEmpty() && QFile::exists(li))
         setStatus(QString("Darrer track: %1  → Prem 'Carregar GPX' per continuar.")
                   .arg(QFileInfo(li).fileName()));
@@ -1378,8 +1398,72 @@ void MainWindow::setStatus(const QString& msg, bool error)
 // ─────────────────────────────────────────────────────────────────────────────
 //  SLOTS — Menú / Barra d'eines
 // ─────────────────────────────────────────────────────────────────────────────
+void MainWindow::onImportDemElevation()
+{
+    if (m_loadedPoints.isEmpty()) return;
+
+    // 1. Comprova quins fitxers .hgt cal i quins falten
+    const SrtmReader::HgtNeeds needs = m_srtmReader.checkNeeds(m_loadedPoints);
+
+    if (!needs.missing.isEmpty()) {
+        QString llista = needs.missing.join("\n  • ");
+        QMessageBox::warning(this, "Fitxers DEM no trobats",
+            QString("Falten els fitxers SRTM següents a la carpeta DEM configurada:\n\n"
+                    "  • %1\n\n"
+                    "Descarrega'ls de https://earthexplorer.usgs.gov o\n"
+                    "https://opentopography.org i posa'ls a la carpeta DEM configurada.")
+            .arg(llista));
+        return;
+    }
+
+    // 2. Demana confirmació
+    const int n = m_loadedPoints.size();
+    const auto resp = QMessageBox::question(this, "Importar altures DEM",
+        QString("Vols substituir les altures de tots els %1 punts del track\n"
+                "amb les dades SRTM? Aquesta acció no es pot desfer.")
+        .arg(n),
+        "Sí, importar", "Cancel·la");
+    if (resp != 0) return;   // 0 = primer botó ("Sí, importar")
+
+    // 3. Assigna les elevacions DEM
+    for (TrackPoint& p : m_loadedPoints)
+        p.elevM = m_srtmReader.elevationAt(p.lat, p.lon);
+
+    // Sincronitza els punts corregits amb el planificador
+    m_planner.setPoints(m_loadedPoints);
+
+    // 4. Refresca UI
+    updateElevationChart(m_loadedPoints);
+    refreshSegmentStats();
+    autoSaveTmp();
+    setStatus(QString("✓ Altures DEM importades — %1 punts actualitzats.").arg(n));
+}
+
 void MainWindow::onOpenSettings()
 {
-    QMessageBox::information(this, "Configuració",
-        "Pròximament disponible.");
+    SettingsDialog dlg(this);
+
+    // Pre-omple amb els valors actuals
+    dlg.setMassKg(m_mass->value());
+    dlg.setFtpW(m_ftp->value());
+    dlg.setCda(m_cda->value());
+    dlg.setCrr(m_crr->value());
+    dlg.setDemFolder(m_settings.value("demFolder",
+                                      QDir::homePath() + "/DEM").toString());
+
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    // Aplica els valors als spinboxes de la finestra principal
+    m_mass->setValue(dlg.massKg());
+    m_ftp ->setValue(dlg.ftpW());
+    m_cda ->setValue(dlg.cda());
+    m_crr ->setValue(dlg.crr());
+
+    // Desa la carpeta DEM a QSettings i actualitza el lector SRTM
+    m_settings.setValue("demFolder", dlg.demFolder());
+    m_srtmReader.setFolder(dlg.demFolder());
+
+    // Si hi ha un GPX carregat, actualitza el pla temporal
+    if (!m_currentGpxPath.isEmpty())
+        autoSaveTmp();
 }

@@ -6,6 +6,7 @@
 #include "TrackPlanner.h"
 #include "ElevationChartView.h"
 #include "PlanSerializer.h"
+#include "SrtmReader.h"
 
 #include <QAreaSeries>
 #include <QLineSeries>
@@ -97,7 +98,9 @@ private slots:
     void onRemoveStop();
     void onSavePlan();                // desa pla definitiu
 
-    void onOpenSettings();              // Configuració (provisional)
+    void onOpenSettings();
+    void onImportDemElevation();
+    void onAddDivisorByCoords();
 
     void onDivisorMoved(int divisorIdx, int newPointIdx);
     void onDivisorAdded(int pointIdx);
@@ -148,10 +151,12 @@ private:
     };
 
     // ── QActions (menú + barra d'eines) ─────────────────────────────────────
-    QAction*            m_actSavePlan    = nullptr;
-    QAction*            m_actCompute     = nullptr;
-    QAction*            m_actExport      = nullptr;
-    QAction*            m_actFixElevation = nullptr;
+    QAction*            m_actSavePlan        = nullptr;
+    QAction*            m_actCompute         = nullptr;
+    QAction*            m_actExport          = nullptr;
+    QAction*            m_actFixElevation    = nullptr;
+    QAction*            m_actImportDem       = nullptr;
+    QAction*            m_actDivisorByCoords = nullptr;
 
     // ── Membres UI ───────────────────────────────────────────────────────────
     QLineEdit*          m_inputPath      = nullptr;
@@ -196,6 +201,7 @@ private:
     QVector<double>     m_cumDistKm;
 
     TrackPlanner        m_planner;
+    SrtmReader          m_srtmReader;
     QSettings           m_settings;
     int                 m_totalPoints    = 0;
     QVector<TrackPoint> m_loadedPoints;

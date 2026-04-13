@@ -18,4 +18,6 @@ HEADERS += \
     TrackPlanner.h \
     PlanSerializer.h \
     ElevationChartView.h \
-    MainWindow.h
+    MainWindow.h \
+    SettingsDialog.h \
+    SrtmReader.h
