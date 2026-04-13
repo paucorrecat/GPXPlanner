@@ -1,6 +1,9 @@
 #include "MainWindow.h"
 
 #include <QApplication>
+#include <QMenuBar>
+#include <QToolBar>
+#include <QAction>
 #include <QProgressDialog>
 #include <QWidget>
 #include <QVBoxLayout>
@@ -62,6 +65,80 @@ MainWindow::~MainWindow()
 // ─────────────────────────────────────────────────────────────────────────────
 void MainWindow::buildUI()
 {
+    // ── Menú ─────────────────────────────────────────────────────────────────
+    auto* mb = menuBar();
+
+    // Menú "Fitxer"
+    auto* menuFitxer = mb->addMenu("&Fitxer");
+
+    auto* actLoad = menuFitxer->addAction("Carregar GPX…");
+    actLoad->setShortcut(QKeySequence("Ctrl+O"));
+    connect(actLoad, &QAction::triggered, this, &MainWindow::onLoadGPX);
+
+    m_actSavePlan = menuFitxer->addAction("Desar pla");
+    m_actSavePlan->setShortcut(QKeySequence("Ctrl+S"));
+    m_actSavePlan->setEnabled(false);
+    connect(m_actSavePlan, &QAction::triggered, this, &MainWindow::onSavePlan);
+
+    menuFitxer->addSeparator();
+
+    m_actExport = menuFitxer->addAction("Exportar GPX…");
+    m_actExport->setShortcut(QKeySequence("Ctrl+E"));
+    m_actExport->setEnabled(false);
+    connect(m_actExport, &QAction::triggered, this, &MainWindow::onExport);
+
+    menuFitxer->addSeparator();
+
+    auto* actQuit = menuFitxer->addAction("Sortir");
+    actQuit->setShortcut(QKeySequence("Ctrl+Q"));
+    connect(actQuit, &QAction::triggered, qApp, &QApplication::quit);
+
+    // Menú "Eines"
+    auto* menuEines = mb->addMenu("&Eines");
+
+    m_actCompute = menuEines->addAction("Calcular");
+    m_actCompute->setShortcut(QKeySequence("F5"));
+    m_actCompute->setEnabled(false);
+    connect(m_actCompute, &QAction::triggered, this, &MainWindow::onCompute);
+
+    m_actFixElevation = menuEines->addAction("Corregir elevació");
+    m_actFixElevation->setShortcut(QKeySequence("F6"));
+    m_actFixElevation->setEnabled(false);
+    m_actFixElevation->setToolTip(
+        "Interpola linealment l'elevació dels punts que no tenien element <ele> al GPX original.");
+    connect(m_actFixElevation, &QAction::triggered, this, &MainWindow::onFixElevation);
+
+    menuEines->addSeparator();
+
+    auto* actSettings = menuEines->addAction("Configuració…");
+    actSettings->setShortcut(QKeySequence("Ctrl+,"));
+    connect(actSettings, &QAction::triggered, this, &MainWindow::onOpenSettings);
+
+    // Menú "Ajuda"
+    auto* menuAjuda = mb->addMenu("A&juda");
+
+    auto* actAbout = menuAjuda->addAction("Sobre GPXPlanner…");
+    connect(actAbout, &QAction::triggered, this, [this]() {
+        QMessageBox::information(this, "Sobre GPXPlanner",
+            "<b>GPXPlanner</b><br>"
+            "Generador de Virtual Partner per a Garmin.<br><br>"
+            "Planificador de tracks ciclistes GPX amb càlcul de timestamps<br>"
+            "basat en potència, pendent i perfil del ciclista.");
+    });
+
+    // ── Barra d'eines ─────────────────────────────────────────────────────────
+    auto* toolBar = addToolBar("Barra d'eines");
+    toolBar->setMovable(false);
+    toolBar->addAction(actLoad);
+    toolBar->addAction(m_actSavePlan);
+    toolBar->addSeparator();
+    toolBar->addAction(m_actCompute);
+    toolBar->addAction(m_actExport);
+    toolBar->addAction(m_actFixElevation);
+    toolBar->addSeparator();
+    toolBar->addAction(actSettings);
+
+    // ── Widget central ────────────────────────────────────────────────────────
     auto* central = new QWidget(this);
     setCentralWidget(central);
     auto* root = new QVBoxLayout(central);
@@ -721,6 +798,7 @@ void MainWindow::autoSaveTmp()
     PlanSerializer::save(m_currentGpxPath, currentPlan(), /*isTemp=*/true);
     m_hasUnsavedChanges = true;
     m_btnSavePlan->setEnabled(true);
+    m_actSavePlan->setEnabled(true);
     updateTitleBar();
 }
 
@@ -1089,11 +1167,14 @@ void MainWindow::onLoadGPX()
     updateSummaryLabels();
     m_btnCompute->setEnabled(true);
     m_btnSavePlan->setEnabled(true);
+    m_actCompute->setEnabled(true);
+    m_actSavePlan->setEnabled(true);
 
     // Activa el botó de correcció d'elevació si hi ha punts sense <ele>
     bool anyMissing = std::any_of(m_loadedPoints.begin(), m_loadedPoints.end(),
                                   [](const TrackPoint& p){ return !p.hasEle; });
     m_btnFixElevation->setEnabled(anyMissing);
+    m_actFixElevation->setEnabled(anyMissing);
 
     updateTitleBar();
 }
@@ -1114,6 +1195,7 @@ void MainWindow::onFixElevation()
     if (totalMissing == 0) {
         setStatus("Cap punt sense elevació trobat.");
         m_btnFixElevation->setEnabled(false);
+        m_actFixElevation->setEnabled(false);
         return;
     }
 
@@ -1163,6 +1245,7 @@ void MainWindow::onFixElevation()
     updateSummaryLabels();
     setStatus(QString("Elevació corregida: %1 punts interpolats.").arg(totalMissing));
     m_btnFixElevation->setEnabled(false);
+    m_actFixElevation->setEnabled(false);
 }
 
 void MainWindow::onCompute()
@@ -1205,6 +1288,7 @@ void MainWindow::onCompute()
     updateSummaryLabels();
     redrawDivisors();
     m_btnExport->setEnabled(true);
+    m_actExport->setEnabled(true);
     autoSaveTmp();
     setStatus("Càlcul completat. Revisa el resum i exporta el GPX.");
     saveSettings();
@@ -1289,4 +1373,13 @@ void MainWindow::setStatus(const QString& msg, bool error)
     m_statusBar->setStyleSheet(
         error ? "padding:3px;background:#FFEBEE;color:#C62828;"
               : "padding:3px;background:#f0f0f0;color:#212121;");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  SLOTS — Menú / Barra d'eines
+// ─────────────────────────────────────────────────────────────────────────────
+void MainWindow::onOpenSettings()
+{
+    QMessageBox::information(this, "Configuració",
+        "Pròximament disponible.");
 }

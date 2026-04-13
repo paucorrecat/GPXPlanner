@@ -13,6 +13,7 @@
 #include <QChart>
 
 QT_BEGIN_NAMESPACE
+class QAction;
 class QLineEdit;
 class QPushButton;
 class QTableWidget;
@@ -96,6 +97,8 @@ private slots:
     void onRemoveStop();
     void onSavePlan();                // desa pla definitiu
 
+    void onOpenSettings();              // Configuració (provisional)
+
     void onDivisorMoved(int divisorIdx, int newPointIdx);
     void onDivisorAdded(int pointIdx);
     void onDivisorRemoved(int divisorIdx);
@@ -143,6 +146,12 @@ private:
         ColSpeed, ColTime, ColCumTime,
         ColCount
     };
+
+    // ── QActions (menú + barra d'eines) ─────────────────────────────────────
+    QAction*            m_actSavePlan    = nullptr;
+    QAction*            m_actCompute     = nullptr;
+    QAction*            m_actExport      = nullptr;
+    QAction*            m_actFixElevation = nullptr;
 
     // ── Membres UI ───────────────────────────────────────────────────────────
     QLineEdit*          m_inputPath      = nullptr;
