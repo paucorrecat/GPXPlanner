@@ -34,6 +34,127 @@
 #include <QLineSeries>
 #include <algorithm>
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  PARSEIG DE COORDENADES
+//  Suporta els formats més habituals de GPS i cartografia:
+//    N41° 34.932 E001° 50.028    (graus + minuts decimals, hemisferi prefix)
+//    41° 34.932' N, 1° 50.028' E (graus + minuts decimals, hemisferi sufix)
+//    41° 34' 55.9" N 1° 50' 1.7" E (graus, minuts, segons, hemisferi sufix)
+//    N41° 34' 55.9" E001° 50' 1.7"  (graus, minuts, segons, hemisferi prefix)
+//    41.5822 1.8340              (graus decimals, separats per espai o coma)
+//    41,5822 1,8340              (graus decimals, coma com decimal europeu)
+// Retorna true si el text s'ha pogut parsejar.
+// ─────────────────────────────────────────────────────────────────────────────
+static bool parseLatLon(const QString& raw, double& outLat, double& outLon)
+{
+    // Normalitza: majúscules, ° ' " → espai
+    QString s = raw.trimmed().toUpper();
+    s.replace(QChar(0x00B0), ' ');  // °
+    s.replace(QChar(0x2019), ' ');  // ' tipogràfic
+    s.replace(QChar(0x201D), ' ');  // " tipogràfic
+    s.replace('\'', ' ');
+    s.replace('"', ' ');
+
+    // Coma: si no hi ha punt, és decimal europeu (41,5822 → 41.5822);
+    //       si ja hi ha punt, la coma és separadora de coordenades.
+    if (!s.contains('.'))
+        s.replace(',', '.');
+    else
+        s.replace(',', ' ');
+
+    s = s.simplified();
+
+    // Funció interna: aplica el signe de l'hemisferi
+    auto applyHemi = [](double v, QChar h) {
+        return (h == 'S' || h == 'W') ? -v : v;
+    };
+
+    // ── Format DMS prefix: [NS] DD MM SS.s [EW] DDD MM SS.s ─────────────────
+    // Provat ABANS del DDM per evitar matches parcials (3 tokens vs 2).
+    // Ex: "N41 34 55.9 E001 50 1.7"
+    {
+        static const QRegularExpression re(
+            R"(([NS])\s*(\d+)\s+(\d+)\s+(\d+\.?\d*)\s+([EW])\s*(\d+)\s+(\d+)\s+(\d+\.?\d*))");
+        auto m = re.match(s);
+        if (m.hasMatch()) {
+            outLat = applyHemi(m.captured(2).toDouble()
+                             + m.captured(3).toDouble() / 60.0
+                             + m.captured(4).toDouble() / 3600.0, m.captured(1)[0]);
+            outLon = applyHemi(m.captured(6).toDouble()
+                             + m.captured(7).toDouble() / 60.0
+                             + m.captured(8).toDouble() / 3600.0, m.captured(5)[0]);
+            return true;
+        }
+    }
+
+    // ── Format DMS sufix: DD MM SS.s [NS] DDD MM SS.s [EW] ──────────────────
+    // Ex: "41 34 55.9 N 1 50 1.7 E"
+    {
+        static const QRegularExpression re(
+            R"((\d+)\s+(\d+)\s+(\d+\.?\d*)\s*([NS])\s+(\d+)\s+(\d+)\s+(\d+\.?\d*)\s*([EW]))");
+        auto m = re.match(s);
+        if (m.hasMatch()) {
+            outLat = applyHemi(m.captured(1).toDouble()
+                             + m.captured(2).toDouble() / 60.0
+                             + m.captured(3).toDouble() / 3600.0, m.captured(4)[0]);
+            outLon = applyHemi(m.captured(5).toDouble()
+                             + m.captured(6).toDouble() / 60.0
+                             + m.captured(7).toDouble() / 3600.0, m.captured(8)[0]);
+            return true;
+        }
+    }
+
+    // ── Format DDM prefix: [NS] DD MM.mmm [EW] DDD MM.mmm ───────────────────
+    // Ex: "N41 34.932 E001 50.028"
+    {
+        static const QRegularExpression re(
+            R"(([NS])\s*(\d+)\s+(\d+\.?\d*)\s+([EW])\s*(\d+)\s+(\d+\.?\d*))");
+        auto m = re.match(s);
+        if (m.hasMatch()) {
+            outLat = applyHemi(m.captured(2).toDouble()
+                             + m.captured(3).toDouble() / 60.0, m.captured(1)[0]);
+            outLon = applyHemi(m.captured(5).toDouble()
+                             + m.captured(6).toDouble() / 60.0, m.captured(4)[0]);
+            return true;
+        }
+    }
+
+    // ── Format DDM sufix: DD MM.mmm [NS] DDD MM.mmm [EW] ────────────────────
+    // Ex: "41 34.932 N 1 50.028 E"
+    {
+        static const QRegularExpression re(
+            R"((\d+)\s+(\d+\.?\d*)\s*([NS])\s+(\d+)\s+(\d+\.?\d*)\s*([EW]))");
+        auto m = re.match(s);
+        if (m.hasMatch()) {
+            outLat = applyHemi(m.captured(1).toDouble()
+                             + m.captured(2).toDouble() / 60.0, m.captured(3)[0]);
+            outLon = applyHemi(m.captured(4).toDouble()
+                             + m.captured(5).toDouble() / 60.0, m.captured(6)[0]);
+            return true;
+        }
+    }
+
+    // ── Format graus decimals: DD.ddddd DD.ddddd ─────────────────────────────
+    // Ex: "41.5822 1.8340"  o  "41,5822 1,8340" (ja normalitzat amb punt)
+    {
+        static const QRegularExpression re(
+            R"(^([+-]?\d+\.?\d*)\s+([+-]?\d+\.?\d*)$)");
+        auto m = re.match(s);
+        if (m.hasMatch()) {
+            bool ok1, ok2;
+            const double lat = m.captured(1).toDouble(&ok1);
+            const double lon = m.captured(2).toDouble(&ok2);
+            if (ok1 && ok2 && qAbs(lat) <= 90.0 && qAbs(lon) <= 180.0) {
+                outLat = lat;
+                outLon = lon;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 // ── Colors estàtics ───────────────────────────────────────────────────────────
 const QList<QColor> MainWindow::k_segColors = {
     QColor(52,152,219), QColor(46,204,113),  QColor(155,89,182),
@@ -104,6 +225,13 @@ void MainWindow::buildUI()
     m_actCompute->setEnabled(false);
     connect(m_actCompute, &QAction::triggered, this, &MainWindow::onCompute);
 
+    m_actDivisorByCoords = menuEines->addAction("Divisor per coordenades…");
+    m_actDivisorByCoords->setShortcut(QKeySequence("Ctrl+D"));
+    m_actDivisorByCoords->setEnabled(false);
+    m_actDivisorByCoords->setToolTip(
+        "Afegeix un divisor de tram al punt del track més proper a les coordenades introduïdes.");
+    connect(m_actDivisorByCoords, &QAction::triggered, this, &MainWindow::onAddDivisorByCoords);
+
     m_actFixElevation = menuEines->addAction("Corregir elevació");
     m_actFixElevation->setShortcut(QKeySequence("F6"));
     m_actFixElevation->setEnabled(false);
@@ -143,6 +271,7 @@ void MainWindow::buildUI()
     toolBar->addAction(m_actSavePlan);
     toolBar->addSeparator();
     toolBar->addAction(m_actCompute);
+    toolBar->addAction(m_actDivisorByCoords);
     toolBar->addAction(m_actImportDem);
     toolBar->addAction(m_actExport);
     toolBar->addAction(m_actFixElevation);
@@ -1181,6 +1310,7 @@ void MainWindow::onLoadGPX()
     m_actCompute->setEnabled(true);
     m_actSavePlan->setEnabled(true);
     m_actImportDem->setEnabled(true);
+    m_actDivisorByCoords->setEnabled(true);
 
     // Activa el botó de correcció d'elevació si hi ha punts sense <ele>
     bool anyMissing = std::any_of(m_loadedPoints.begin(), m_loadedPoints.end(),
@@ -1302,6 +1432,7 @@ void MainWindow::onCompute()
     m_btnExport->setEnabled(true);
     m_actExport->setEnabled(true);
     m_actImportDem->setEnabled(true);
+    m_actDivisorByCoords->setEnabled(true);
     autoSaveTmp();
     setStatus("Càlcul completat. Revisa el resum i exporta el GPX.");
     saveSettings();
@@ -1398,6 +1529,63 @@ void MainWindow::setStatus(const QString& msg, bool error)
 // ─────────────────────────────────────────────────────────────────────────────
 //  SLOTS — Menú / Barra d'eines
 // ─────────────────────────────────────────────────────────────────────────────
+void MainWindow::onAddDivisorByCoords()
+{
+    if (m_loadedPoints.isEmpty()) return;
+
+    // Demana les coordenades a l'usuari
+    bool ok;
+    const QString text = QInputDialog::getText(
+        this,
+        "Divisor per coordenades",
+        "Introdueix les coordenades del punt de divisió:\n\n"
+        "Formats acceptats:\n"
+        "  N41° 34.932 E001° 50.028\n"
+        "  41° 34.932' N, 1° 50.028' E\n"
+        "  41° 34' 55.9\" N  1° 50' 1.7\" E\n"
+        "  41.5822 1.8340",
+        QLineEdit::Normal, QString(), &ok);
+
+    if (!ok || text.trimmed().isEmpty()) return;
+
+    double lat, lon;
+    if (!parseLatLon(text, lat, lon)) {
+        QMessageBox::warning(this, "Format no reconegut",
+            "No s'han pogut interpretar les coordenades introduïdes.\n\n"
+            "Comprova el format i torna-ho a provar.");
+        return;
+    }
+
+    // Cerca el punt del track més proper per distància haversine
+    TrackPoint ref;
+    ref.lat = lat;
+    ref.lon = lon;
+
+    int    bestIdx  = 0;
+    double bestDist = m_loadedPoints[0].distanceTo(ref);
+    for (int i = 1; i < m_loadedPoints.size(); ++i) {
+        const double d = m_loadedPoints[i].distanceTo(ref);
+        if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+
+    // Delega a onDivisorAdded, que ja gestiona GAP, potències, etc.
+    onDivisorAdded(bestIdx);
+
+    // onDivisorAdded pot rebutjar el punt si és massa proper a un divisor existent;
+    // comprovem si realment s'ha afegit per informar l'usuari.
+    if (m_divisors.contains(bestIdx)) {
+        setStatus(QString("Divisor afegit al punt #%1 · pk %2 km · a %3 m de les coordenades.")
+            .arg(bestIdx)
+            .arg(m_cumDistKm[bestIdx], 0, 'f', 2)
+            .arg(bestDist, 0, 'f', 0));
+    } else {
+        setStatus(QString("No s'ha pogut afegir el divisor al pk %1 km "
+                          "(massa proper a un divisor existent).")
+            .arg(m_cumDistKm[qBound(0, bestIdx, m_totalPoints-1)], 0, 'f', 2),
+                  /*error=*/true);
+    }
+}
+
 void MainWindow::onImportDemElevation()
 {
     if (m_loadedPoints.isEmpty()) return;
