@@ -1239,7 +1239,10 @@ void MainWindow::onLoadGPX()
     QString err;
     m_loadedPoints = GPXParser::loadGPX(path, err);
     if (m_loadedPoints.isEmpty()) {
-        setStatus("El fitxer no conté punts vàlids.",true); return;
+        QString msg = err.isEmpty() ? "El fitxer no conté punts vàlids." : err;
+        setStatus(msg, true);
+        QMessageBox::warning(this, "Error llegint GPX", msg);
+        return;
     }
 
     // Pas 2: carregar al planificador

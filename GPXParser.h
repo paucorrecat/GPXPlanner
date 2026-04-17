@@ -34,27 +34,56 @@ public:
         }
 
         QXmlStreamReader xml(&file);
+        xml.setNamespaceProcessing(false); // permet prefixos ns3:, gpxtpx:, etc. de QMapShack/Garmin
         TrackPoint current;
-        bool inTrkpt = false;
+        bool inTrkpt   = false;
+        bool foundGpx  = false;
+        int  wptCount  = 0;
+        QStringList unknownRootTags;
 
         while (!xml.atEnd()) {
             xml.readNext();
 
+            if (xml.hasError()) {
+                errorOut = QString("Error XML a la línia %1, columna %2: %3")
+                           .arg(xml.lineNumber())
+                           .arg(xml.columnNumber())
+                           .arg(xml.errorString());
+                return points;
+            }
+
             if (xml.isStartElement()) {
-                if (xml.name() == QLatin1String("trkpt") ||
-                    xml.name() == QLatin1String("rtept")) {
+                const auto name = xml.name();
+
+                if (name == QLatin1String("gpx"))
+                    foundGpx = true;
+                else if (name == QLatin1String("wpt"))
+                    ++wptCount;
+                else if (name == QLatin1String("trkpt") ||
+                         name == QLatin1String("rtept")) {
                     inTrkpt = true;
                     current = {};
-                    current.lat = xml.attributes().value("lat").toDouble();
-                    current.lon = xml.attributes().value("lon").toDouble();
+                    bool latOk, lonOk;
+                    current.lat = xml.attributes().value("lat").toDouble(&latOk);
+                    current.lon = xml.attributes().value("lon").toDouble(&lonOk);
+                    if (!latOk || !lonOk) {
+                        errorOut = QString("Punt sense coordenades vàlides a la línia %1")
+                                   .arg(xml.lineNumber());
+                        return points;
+                    }
                 }
-                else if (inTrkpt && xml.name() == QLatin1String("ele")) {
+                else if (inTrkpt && name == QLatin1String("ele")) {
                     current.elevM  = xml.readElementText().toDouble();
                     current.hasEle = true;
                 }
-                else if (inTrkpt && xml.name() == QLatin1String("time")) {
+                else if (inTrkpt && name == QLatin1String("time")) {
                     current.time = QDateTime::fromString(
                         xml.readElementText(), Qt::ISODate);
+                }
+                else if (!foundGpx && xml.isStartElement()) {
+                    const QString tag = name.toString();
+                    if (!unknownRootTags.contains(tag))
+                        unknownRootTags.append(tag);
                 }
             }
             else if (xml.isEndElement()) {
@@ -66,8 +95,20 @@ public:
             }
         }
 
-        if (xml.hasError())
-            errorOut = xml.errorString();
+        if (points.isEmpty()) {
+            if (!foundGpx) {
+                if (!unknownRootTags.isEmpty())
+                    errorOut = QString("No és un fitxer GPX vàlid (element arrel: <%1>)")
+                               .arg(unknownRootTags.first());
+                else
+                    errorOut = "El fitxer és buit o no és XML.";
+            } else if (wptCount > 0) {
+                errorOut = QString("El fitxer conté %1 waypoint(s) però cap track ni ruta. "
+                                   "Exporta'l com a track des de QMapShack.").arg(wptCount);
+            } else {
+                errorOut = "El fitxer GPX no conté cap element <trkpt> ni <rtept>.";
+            }
+        }
 
         return points;
     }
